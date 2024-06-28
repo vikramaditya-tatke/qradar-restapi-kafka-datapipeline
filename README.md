@@ -1,0 +1,1 @@
+# qradar-restapi-kafka-datapipeline
