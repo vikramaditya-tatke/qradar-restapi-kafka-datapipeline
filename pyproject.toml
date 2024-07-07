@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "qradar-restapi-kafka-datapipeline"
+version = "0.1.0"
+description = ""
+authors = ["Vikramaditya Tatke <vtatke@securityhq.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.32.3"
+pydantic-settings = "^2.3.4"
+confluent-kafka = "^2.4.0"
+loguru = "^0.7.2"
+ujson = "^5.10.0"
+python-logstash-async = "^3.0.0"
+ijson = "^3.3.0"
+tenacity = "^8.4.2"
+urllib3 = "^2.2.2"
+polars = "^0.20.31"
+pymongoarrow = "^1.4.0"
+duckdb = "^1.0.0"
+streamlit = "^1.36.0"
+tqdm = "^4.66.4"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
