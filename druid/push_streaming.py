@@ -8,6 +8,7 @@ from requests.exceptions import RequestException
 import requests
 
 disable_warnings(InsecureRequestWarning)
+
 session = Session()
 session.headers = {
     "Authorization": f"Basic {settings.imply_api_key}",

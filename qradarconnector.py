@@ -115,7 +115,7 @@ class QRadarConnector:
         except Exception as e:
             print(e)
 
-    def trigger_search(self, base_url: str, query_expression: dict) -> dict:
+    def trigger_search(self, query_expression: dict) -> dict:
         """Triggers a QRadar search using the provided query expression.
 
         Args:
@@ -126,20 +126,15 @@ class QRadarConnector:
             dict: Response Header
         """
 
-        url = f"{base_url}/api/ariel/searches"
+        url = f"{self.base_url}/api/ariel/searches"
         params = {
             "query_expression": query_expression,
         }
         response = self._make_request(
-            "POST",
-            url,
+            method="POST",
+            url=url,
             params=params,
-            headers={
-                "SEC": self.sec_token,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Version": "20.0",
-            },
+            headers=self.headers,
         )
         if response:
             return response.json()
@@ -163,7 +158,6 @@ class QRadarConnector:
         self,
         response_header: dict,
         producer: Producer,
-        total_record_count: int,
         search_params: dict,
     ):
         """Initaites a GET request to stream the entire search result at once.
@@ -176,6 +170,7 @@ class QRadarConnector:
         Yields:
             dict: Yeilds the dict yeiled by the _parse_qradar_data() method to the Kafka producer.
         """
+        total_record_count = response_header["record_count"]
         current_record_count = 0
         max_retries = 3
         retry_count = 0
