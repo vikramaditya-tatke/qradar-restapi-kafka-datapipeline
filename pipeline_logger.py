@@ -1,4 +1,5 @@
 import sys
+
 import loguru
 import ujson
 
@@ -46,11 +47,11 @@ def modify_logger():
     logger = loguru.logger.patch(patching)
     logger.remove(0)
     logger.add(
-        "app.log",
+        "./application_logs/app.log",
         format="{extra[serialized]}",
         rotation="1 day",
-        retention="1 minute",
-        enqueue="True",
+        retention="1 day",
+        enqueue=True,
     )
 
     logger.add(
