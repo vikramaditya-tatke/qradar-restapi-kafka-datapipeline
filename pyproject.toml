@@ -25,6 +25,8 @@ kafka = "^1.3.5"
 kafka-python-ng = "^2.2.2"
 black = "^24.4.2"
 pylint = "^3.2.5"
+prettier = "^0.0.7"
+clickhouse-connect = "^0.7.16"
 
 
 [build-system]

@@ -10,11 +10,9 @@ def construct_base_urls() -> str:
 
 
 def adjust_stop_time(search_params):
-    """
-
-    """
-    large_queries = ["AllowedOutboundTraffic", "AllowedInboundTraffic"]
-    medium_queries = ["AuthenticationFailure", "TopSecurityEvents", "CREEvents"]
+    """ """
+    large_queries = []
+    medium_queries = []
     start_time = datetime.strptime(search_params["start_time"], "%Y-%m-%d %H:%M:%S")
     stop_time = datetime.strptime(search_params["stop_time"], "%Y-%m-%d %H:%M:%S")
     # Calculate time difference
@@ -22,12 +20,16 @@ def adjust_stop_time(search_params):
     query = search_params["query"]
     # Check if query is in allowed list and time difference exceeds 3 hours
     if query["query_name"] in large_queries and time_diff > timedelta(hours=3):
-        logger.debug("Time difference is greater than 3 hours for a larger query. Creating chunks of 3 hours.")
+        logger.debug(
+            "Time difference is greater than 3 hours for a larger query. Creating chunks of 3 hours."
+        )
         new_stop_time = start_time + timedelta(hours=3)
         split_query = True
         return search_params["start_time"], new_stop_time, split_query
     elif query["query_name"] in medium_queries and time_diff > timedelta(hours=6):
-        logger.debug("Time difference is greater than 6 hours for a medium query. Creating chunks of 6 hours.")
+        logger.debug(
+            "Time difference is greater than 6 hours for a medium query. Creating chunks of 6 hours."
+        )
         new_stop_time = start_time + timedelta(hours=6)
         split_query = True
         return search_params["start_time"], new_stop_time, split_query
@@ -37,25 +39,25 @@ def adjust_stop_time(search_params):
 
 
 def get_search_params(search_params):
-    """
-
-    """
+    """ """
     search_params = {
         "event_processor": search_params[0],
         "customer_name": search_params[1],
-        "query": {"query_name": search_params[2][0], "query_expression": search_params[2][1]},
-        "start_time": "2024-07-01 00:00:00",
-        "stop_time": "2024-07-02 00:00:00",
+        "query": {
+            "query_name": search_params[2][0],
+            "query_expression": search_params[2][1],
+        },
+        "start_time": "2024-07-15 00:00:00",
+        "stop_time": "2024-07-16 00:00:00",
     }
-    customer_name = search_params["customer_name"]
-    event_processor = search_params.get("event_processor")
     start_time, new_stop_time, split_query = adjust_stop_time(search_params)
-
     search_params["stop_time"] = new_stop_time.strftime("%Y-%m-%d %H:%M:%S")
-    search_params["query"]["query_expression"] = search_params["query"]["query_expression"].format(
-        customer_name=customer_name,
+    search_params["query"]["query_expression"] = search_params["query"][
+        "query_expression"
+    ].format(
+        customer_name=search_params["customer_name"],
         start_time=start_time,
         stop_time=new_stop_time.strftime("%Y-%m-%d %H:%M:%S"),
-        event_processor=event_processor,
+        event_processor=search_params["event_processor"],
     )
     return search_params, split_query

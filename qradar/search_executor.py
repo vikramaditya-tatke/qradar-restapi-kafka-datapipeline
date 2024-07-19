@@ -1,3 +1,4 @@
+import requests.exceptions
 from requests import Session
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -10,7 +11,9 @@ from settings import settings
 @retry(
     stop=stop_after_attempt(settings.max_attempts),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry_error_callback=lambda retry_state: logger.error(f"Retry attempt {retry_state.attempt_number} failed."),
+    retry_error_callback=lambda retry_state: logger.error(
+        f"Retry attempt {retry_state.attempt_number} failed."
+    ),
     reraise=True,  # Re-raise the final exception
 )
 def search_executor(search_params):
@@ -18,7 +21,9 @@ def search_executor(search_params):
     Performs a QRadar search with retry mechanism and detailed logging.
     Creates a process for each console.
     """
-    logger.info(f"event_processor: {search_params[0]}, customer_name: {search_params[1]}, query: {search_params[2][0]}")
+    logger.info(
+        f"event_processor: {search_params[0]}, customer_name: {search_params[1]}, query: {search_params[2][0]}"
+    )
     search_params, split_query = get_search_params(search_params)
     logger.debug("Generated search parameters")
     session = Session()
@@ -51,7 +56,13 @@ def search_executor(search_params):
             qradar_connector.get_search_data(polling_response_header, search_params)
         else:
             logger.warning(f"Search failed after maximum attempts for {cursor_id}")
-
+    except (
+        requests.exceptions.ReadTimeout,
+        requests.exceptions.ConnectTimeout,
+    ) as timeout:
+        logger.error("Timeout occurred while polling for search status")
+    except requests.exceptions.ChunkedEncodingError as cee:
+        logger.exception(f"Error occurred during QRadar Search: {cee}")
     except Exception as e:
-        logger.error(f"Error during QRadar search: {e}")
+        logger.exception(f"Error during QRadar search: {e}")
         raise  # Important to re-raise for retry to work

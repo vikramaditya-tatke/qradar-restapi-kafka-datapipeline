@@ -1,11 +1,13 @@
-from urllib3 import disable_warnings
-from requests import Session
 from gzip import compress
-from settings import settings
-from urllib3.exceptions import InsecureRequestWarning
-from requests.models import Response
-from requests.exceptions import RequestException
+
 import requests
+from requests import Session
+from requests.exceptions import RequestException
+from requests.models import Response
+from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
+
+from settings import settings
 
 disable_warnings(InsecureRequestWarning)
 
@@ -71,6 +73,7 @@ def push_data(payload_bytes: bytes, push_streaming_endpoint: str):
     except requests.exceptions.HTTPError as http_err:
         if 400 <= http_err.response.status_code < 500:
             raise ImplyClientError(f"Client Error", http_err.response) from http_err
+
         elif 500 <= http_err.response.status_code < 600:
             raise ImplyServerError(f"Server Error", http_err.response) from http_err
         else:

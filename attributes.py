@@ -24,7 +24,12 @@ class AttributeLoader:
 
 def load_attributes():
     loader = AttributeLoader()
-    return {
-        "ep_client_list": loader.load_ep_client_list(),
-        "queries": loader.load_queries(),
-    }
+    try:
+        return {
+            "ep_client_list": loader.load_ep_client_list(),
+            "queries": loader.load_queries(),
+        }
+    except json.decoder.JSONDecodeError as e:
+        raise print("Exception occured")
+    except FileNotFoundError as fnf:
+        raise FileNotFoundError(str(fnf))
