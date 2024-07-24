@@ -1,11 +1,13 @@
 import requests.exceptions
-from requests import Session
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from pipeline_logger import logger
-from qradar.qradarconnector import QRadarConnector
-from qradar.query_builder import get_search_params, construct_base_urls
+from qradar.query_builder import get_search_params
 from settings import settings
+
+
+# TODO: Correctly handle the situation where a valid search id is not found after multiple polling attempts and start a
+# new search.
 
 
 @retry(
@@ -24,23 +26,16 @@ def search_executor(search_params):
     logger.info(
         f"event_processor: {search_params[0]}, customer_name: {search_params[1]}, query: {search_params[2][0]}"
     )
+    qradar_connector = search_params[3]
     search_params, split_query = get_search_params(search_params)
     logger.debug("Generated search parameters")
-    session = Session()
-    qradar_connector = QRadarConnector(
-        sec_token=settings.console_3_token,
-        session=session,
-        base_url=construct_base_urls(),
-    )
     query_expression = search_params["query"]["query_expression"]
     retry_attempt = 0
     polling_response_header = None
     try:
         search = qradar_connector.trigger_search(query_expression)
         logger.info("Search Triggered")
-        cursor_id = search.get("cursor_id")
-        if not cursor_id:
-            raise ValueError("Invalid search response: missing cursor_id")
+        cursor_id = search["cursor_id"]
         while retry_attempt < settings.max_attempts:
             retry_attempt += 1
             polling_response_header = qradar_connector.get_search_status(cursor_id)
@@ -52,17 +47,24 @@ def search_executor(search_params):
                 logger.debug("Search still in progress...")
 
         if polling_response_header:
-            logger.info(f"Started Data Fetching for {cursor_id}")
-            qradar_connector.get_search_data(polling_response_header, search_params)
+            logger.info(f"Getting QRadar Table Name for {cursor_id}")
+            parser_key_response_header = qradar_connector.get_parser_key(
+                polling_response_header
+            )
+            for key, value in parser_key_response_header.items():
+                search_params["parser_key"] = key
+                search_params["response_header"] = value
+            return search_params
         else:
             logger.warning(f"Search failed after maximum attempts for {cursor_id}")
     except (
         requests.exceptions.ReadTimeout,
         requests.exceptions.ConnectTimeout,
-    ) as timeout:
-        logger.error("Timeout occurred while polling for search status")
-    except requests.exceptions.ChunkedEncodingError as cee:
-        logger.exception(f"Error occurred during QRadar Search: {cee}")
+        requests.exceptions.ConnectionError,
+        requests.exceptions.TooManyRedirects,
+        requests.exceptions.HTTPError,
+    ):
+        logger.error("Error occurred while polling for search status")
+        raise
     except Exception as e:
         logger.exception(f"Error during QRadar search: {e}")
-        raise  # Important to re-raise for retry to work

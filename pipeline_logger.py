@@ -47,7 +47,7 @@ def modify_logger():
     logger = loguru.logger.patch(patching)
     logger.remove(0)
     logger.add(
-        "./application_logs/app.log",
+        "./logs/app.log",
         format="{extra[serialized]}",
         rotation="1 day",
         retention="1 day",

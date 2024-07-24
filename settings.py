@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     max_search_ttc_in_seconds: int
     batch_size_limit: int
     imply_base_url: str
+    clickhouse_base_url: str
+    clickhouse_batch_size: int
+    clickhouse_compression_protocol: str
+    clickhouse_password: str
+    clickhouse_port: int
+    clickhouse_user: str
     model_config = SettingsConfigDict(env_file=".env")
 
 
