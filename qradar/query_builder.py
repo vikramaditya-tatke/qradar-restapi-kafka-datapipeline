@@ -51,8 +51,8 @@ def get_search_params(search_params):
             "query_name": search_params[2][0],
             "query_expression": search_params[2][1],
         },
-        "start_time": "2024-07-19 00:00:00",
-        "stop_time": "2024-07-20 00:00:00",
+        "start_time": "2024-07-23 00:00:00",
+        "stop_time": "2024-07-24 00:00:00",
     }
     start_time, new_stop_time, split_query = adjust_stop_time(search_params)
     search_params["stop_time"] = new_stop_time.strftime("%Y-%m-%d %H:%M:%S")

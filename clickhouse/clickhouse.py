@@ -76,6 +76,6 @@ def create_clickhouse_table(click_house_table_name, client, fields, summing_fiel
             ORDER BY tuple(
                 {", ".join(summing_fields)}
             )
-            SETTINGS allow_nullable_key = 1
+            SETTINGS allow_nullable_key = 1, async_insert = 1
         """
     client.command(create_table_query)

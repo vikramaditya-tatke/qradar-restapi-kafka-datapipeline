@@ -65,7 +65,14 @@ def etl(
         ) as response:
             response.raise_for_status()
             client = clickhouse.create_clickhouse_client()
-            customer_name = search_params["customer_name"]
+            customer_name = (
+                search_params["customer_name"]
+                .replace(" ", "")
+                .replace("'", "")
+                .replace('"', "")
+                .replace("&", "")
+                .replace("_", "")
+            )
             query_name = search_params["query"]["query_name"]
             click_house_table_name = f"{customer_name}_{query_name}"
             progress_bar = initialize_progress_bar(search_params)
