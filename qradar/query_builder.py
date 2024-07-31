@@ -6,7 +6,7 @@ from settings import settings
 
 def construct_base_urls() -> dict:
     """Constructs a dictionary of base URLs for QRadar consoles."""
-    return {"console_3": f"https://{settings.console_3_ip}"}
+    return {"console_3": f"http://{settings.console_3_ip}"}
 
 
 # TODO: Add Logic to split query if the time range is too large or add logic to create a time_range based on the

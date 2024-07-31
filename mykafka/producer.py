@@ -8,9 +8,9 @@ def create_producer():
     try:
         producer = Producer(
             {
-                "bootstrap.servers": "localhost:9093",
-                "sasl.username": "kafka",
-                "sasl.password": "kafka",
+                "bootstrap.servers": "",
+                "sasl.username": "",
+                "sasl.password": "",
                 "sasl.mechanism": "PLAIN",
                 "security.protocol": "SASL_PLAINTEXT",
             }

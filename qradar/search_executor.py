@@ -65,6 +65,5 @@ def search_executor(search_params):
         requests.exceptions.HTTPError,
     ):
         logger.error("Error occurred while polling for search status")
-        raise
     except Exception as e:
         logger.exception(f"Error during QRadar search: {e}")
