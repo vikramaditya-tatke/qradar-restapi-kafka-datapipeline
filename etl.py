@@ -15,6 +15,7 @@ import ujson
 logger = logging.getLogger(__name__)
 
 
+# TODO: Fix the IncompleteJSONError at `for event in ijson.items(response.raw, parser_key)`
 def _parse_qradar_data(
     response: requests.Response, parser_key: str
 ) -> Generator[Dict[str, Any], None, None]:
@@ -25,27 +26,30 @@ def _parse_qradar_data(
             yield transformed_event
     except ValueError as ve:
         logger.exception(f"Error parsing QRadar data: {ve}")
+    except ijson.common.IncompleteJSONError as ij:
+        logger.error(f"Error parsing QRadar data: {ij}")
 
 
 # TODO: Re-enable the progress bar.
 
-# def initialize_progress_bar(search_params) -> tqdm:
-#     return tqdm(
-#         total=search_params["response_header"]["record_count"],
-#         desc=f"Receiving data for {search_params['customer_name']} {search_params['query']['query_name']} {search_params['response_header']['cursor_id']} {search_params['event_processor']}",
-#     )
+
+def initialize_progress_bar(search_params) -> tqdm:
+    return tqdm(
+        total=search_params["response_header"]["record_count"],
+        desc=f"Receiving data for {search_params['customer_name']} {search_params['query']['query_name']} {search_params['response_header']['cursor_id']} {search_params['event_processor']}",
+    )
 
 
 def extract(
     response: requests.Response,
-    # progress_bar: tqdm,
+    progress_bar: tqdm,
     parser_key: str,
 ) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
     batch = []
     current_record_count = 0
     for event in _parse_qradar_data(response, parser_key):
         current_record_count += 1
-        # progress_bar.update()
+        progress_bar.update()
         batch.append(event)
         if len(batch) >= settings.clickhouse_batch_size:
             yield batch, current_record_count
@@ -57,7 +61,7 @@ def extract(
 # TODO: Implement proper error handling
 def extract_and_produce_to_kafka(
     response: requests.Response,
-    # progress_bar: tqdm,
+    progress_bar: tqdm,
     parser_key: str,
 ) -> None:
     producer = create_producer()
@@ -65,8 +69,11 @@ def extract_and_produce_to_kafka(
     try:
         for event in _parse_qradar_data(response, parser_key):
             current_record_count += 1
-            byte_event = ujson.dumps(event)
-            producer.produce(topic="demo_topic", value=byte_event)
+            progress_bar.update()
+            str_event = ujson.dumps(event)
+            producer.produce(topic="demo_cluster", value=str_event)
+        producer.flush()
+        progress_bar.close()
     except Exception as e:
         logger.error(f"HTTP error occurred: {e}")
 
@@ -104,11 +111,15 @@ def etl(
             )
             query_name = search_params["query"]["query_name"]
             click_house_table_name = f"{customer_name}_{query_name}"
-            # progress_bar = initialize_progress_bar(search_params)
-            extract_and_produce_to_kafka(response, search_params["parser_key"])
+            progress_bar = initialize_progress_bar(search_params)
+            extract_and_produce_to_kafka(
+                response,
+                progress_bar,
+                search_params["parser_key"],
+            )
             # for batch, current_record_count in extract(
             #     response,
-            #     # progress_bar,
+            #     progress_bar,
             #     search_params["parser_key"],
             # ):
             #     arrow_table, summing_fields, fields = transform(batch)
@@ -133,7 +144,7 @@ def etl(
 #     retry_error_callback=lambda retry_state: logger.error(
 #         f"Retry attempt {retry_state.attempt_number} failed."
 #     ),
-#     reraise=True,  # Re-raise the final exception
+#     reraise=True,  # Reraise the final exception
 # )
 def etl_with_retry(
     session: requests.Session, search_params: Dict[str, Any], base_url: str
