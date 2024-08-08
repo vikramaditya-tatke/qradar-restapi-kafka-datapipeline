@@ -79,7 +79,8 @@ def extract_and_produce_to_kafka(
 
 
 def transform(batch: List[Dict[str, Any]]) -> Tuple[Any, List[str], List[str]]:
-    return helpers.transform_to_arrow(batch)
+    # return helpers.transform_to_arrow(batch)
+    return helpers.transform_to_dataframe(batch)
 
 
 # TODO: Re-enable the headers and upload to confluent cloud.
@@ -112,11 +113,11 @@ def etl(
             query_name = search_params["query"]["query_name"]
             click_house_table_name = f"{customer_name}_{query_name}"
             progress_bar = initialize_progress_bar(search_params)
-            extract_and_produce_to_kafka(
-                response,
-                progress_bar,
-                search_params["parser_key"],
-            )
+            # extract_and_produce_to_kafka(
+            #     response,
+            #     progress_bar,
+            #     search_params["parser_key"],
+            # )
             # for batch, current_record_count in extract(
             #     response,
             #     progress_bar,
@@ -126,10 +127,22 @@ def etl(
             #     clickhouse.create_clickhouse_table(
             #         click_house_table_name, client, fields, summing_fields
             #     )
-            #     clickhouse.load_using_summing_merge_tree(
-            #         click_house_table_name, client, arrow_table, summing_fields, fields
+            #     clickhouse.load_arrow_using_summing_merge_tree(
+            #         click_house_table_name, client, arrow_table
             #     )
-            # progress_bar.close()
+            for batch, current_record_count in extract(
+                response,
+                progress_bar,
+                search_params["parser_key"],
+            ):
+                dataframe, summing_fields, fields = transform(batch)
+                clickhouse.create_summing_merge_tree_table(
+                    click_house_table_name, client, fields, summing_fields
+                )
+                clickhouse.load_dataframe_using_summing_merge_tree(
+                    click_house_table_name, client, dataframe
+                )
+            progress_bar.close()
     except HTTPError as http_err:
         logger.error(f"HTTP error occurred: {http_err}")
         raise

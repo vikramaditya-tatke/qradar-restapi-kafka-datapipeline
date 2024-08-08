@@ -1,7 +1,7 @@
 import ipaddress
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
-
+import pandas as pd
 import pyarrow as pa
 from dateutil.relativedelta import SA, relativedelta
 
@@ -90,6 +90,7 @@ def add_date(line_json):
     return line_json
 
 
+# TODO: Replace these in the rename event function
 def clean_column_name(field_name: str) -> str:
     """Removes special characters from column names."""
     return (
@@ -198,4 +199,61 @@ def transform_to_arrow(
         return data_table, summing_fields, fields
     except Exception as ee:
         logger.error(f"Data Transformation Failed: {ee}")
+        raise
+
+
+def get_clickhouse_type_for_dataframe(dtype, col_name: str = None) -> str:
+    """Maps Pandas data types to ClickHouse data types."""
+    type_map = {
+        "object": "String",  # Pandas uses 'object' for strings
+        "int64": "Int64",
+        "float64": "Float64",
+        "bool": "UInt8",
+        "datetime64[ns]": "DateTime64(3)",  # Pandas datetime type
+        "datetime64[ns, UTC]": "DateTime64(3)",  # Handle timezone-aware datetime
+        "date": "Date",  # For Pandas date
+        # Add more mappings as needed
+    }
+
+    # Special handling for IP addresses
+    if col_name in ("ReportDate", "WeekFrom"):
+        return "Date"  # Assuming you want to store IP addresses as IPv4
+
+    return type_map.get(
+        dtype.name, "String"
+    )  # Default to String if not found in the map
+
+
+def transform_to_dataframe(
+    data: List[Dict[str, Any]]
+) -> Tuple[pd.DataFrame, List[str], List[str]]:
+    """Transforms data to a Pandas DataFrame and prepares metadata for ClickHouse."""
+    try:
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        df["Start Time"] = pd.to_datetime(df["Start Time"], unit="ms")
+        df["ReportDate"] = pd.to_datetime(df["ReportDate"], format="%d/%m/%Y").dt.date
+        df["WeekFrom"] = pd.to_datetime(df["WeekFrom"], format="%d/%m/%Y").dt.date
+
+        # Field definitions for ClickHouse table schema
+        fields = [
+            (
+                f'"{col}" Nullable({get_clickhouse_type_for_dataframe(dtype=df[col].dtype, col_name=col)})'
+                if col == "Username"
+                else f'"{col}" {get_clickhouse_type_for_dataframe(dtype=df[col].dtype, col_name=col)}'
+            )
+            for col in df.columns
+        ]
+
+        # Summing fields for potential SummingMergeTree table (optional)
+        summing_fields = [
+            (f'toStartOfHour("{col}")' if col == "Start Time" else f'"{col}"')
+            for col in df.columns
+            if col != "Event Count"
+        ]
+
+        return df, summing_fields, fields
+
+    except Exception as e:
+        print(f"Transformation failed: {e}")
         raise
