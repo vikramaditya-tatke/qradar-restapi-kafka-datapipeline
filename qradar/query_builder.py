@@ -6,7 +6,7 @@ from settings import settings
 
 def construct_base_urls() -> dict:
     """Constructs a dictionary of base URLs for QRadar consoles."""
-    return {"console_3": f"http://{settings.console_3_ip}"}
+    return {"console_3": f"https://{settings.console_3_ip}"}
 
 
 # TODO: Add Logic to split query if the time range is too large or add logic to create a time_range based on the
@@ -51,8 +51,8 @@ def get_search_params(search_params):
             "query_name": search_params[2][0],
             "query_expression": search_params[2][1],
         },
-        "start_time": "2024-07-23 00:00:00",
-        "stop_time": "2024-07-24 00:00:00",
+        "start_time": "2024-07-24 00:00:00",
+        "stop_time": "2024-07-25 00:00:00",
     }
     start_time, new_stop_time, split_query = adjust_stop_time(search_params)
     search_params["stop_time"] = new_stop_time.strftime("%Y-%m-%d %H:%M:%S")

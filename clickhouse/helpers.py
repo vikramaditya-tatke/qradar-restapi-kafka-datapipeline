@@ -1,6 +1,7 @@
 import ipaddress
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
+
 import pandas as pd
 import pyarrow as pa
 from dateutil.relativedelta import SA, relativedelta
@@ -84,8 +85,8 @@ def add_date(line_json):
     base_date = datetime.fromtimestamp(query_timestamp)
     previous_saturday = base_date + relativedelta(weekday=SA(-1))
 
-    line_json["WeekFrom"] = previous_saturday.strftime("%d/%m/%Y")
-    line_json["ReportDate"] = base_date.strftime("%d/%m/%Y")
+    line_json["WeekFrom"] = previous_saturday.date()
+    line_json["ReportDate"] = base_date.date()
 
     return line_json
 
@@ -217,11 +218,49 @@ def get_clickhouse_type_for_dataframe(dtype, col_name: str = None) -> str:
 
     # Special handling for IP addresses
     if col_name in ("ReportDate", "WeekFrom"):
-        return "Date"  # Assuming you want to store IP addresses as IPv4
+        return "Date"
 
     return type_map.get(
         dtype.name, "String"
     )  # Default to String if not found in the map
+
+
+def get_clickhouse_type_for_dict(value):
+    if value in ["Source IP", "Destination IP"]:
+        return "IPv4"
+    elif value in ["Event Count", "Bytes Sent", "Bytes Received"]:
+        return "Int64"
+    elif value in ["Source Port", "Destination Port", "Domain"]:
+        return "UInt16"
+    elif value in ["Start Time"]:
+        return "DateTime64(3)"
+    elif value in ["ReportDate", "WeekFrom"]:
+        return "Date"
+    elif value not in ["Process Name", "Error Code", "Username", "Policy Name"]:
+        return "LowCardinality(String)"
+    else:
+        return "String"
+
+
+def transform_raw(data: List[Dict[str, Any]]):
+    field_names = data[0].keys()
+    rows = [tuple(row[field] for field in field_names) for row in data]
+    fields = [
+        (
+            f'"{key}" Nullable({get_clickhouse_type_for_dict(key)})'
+            if key == "Policy Name"
+            else f'"{key}" {get_clickhouse_type_for_dict(key)}'
+        )
+        for key in field_names
+    ]
+
+    # Generate summing fields for the ORDER BY clause (custom logic)
+    summing_fields = [
+        f'toStartOfHour("{key}")' if key == "Start Time" else f'"{key}"'
+        for key in field_names
+        if key != "Event Count"
+    ]
+    return rows, summing_fields, fields
 
 
 def transform_to_dataframe(
@@ -234,12 +273,12 @@ def transform_to_dataframe(
         df["Start Time"] = pd.to_datetime(df["Start Time"], unit="ms")
         df["ReportDate"] = pd.to_datetime(df["ReportDate"], format="%d/%m/%Y").dt.date
         df["WeekFrom"] = pd.to_datetime(df["WeekFrom"], format="%d/%m/%Y").dt.date
-
+        df.columns = df.columns.map(clean_column_name)
         # Field definitions for ClickHouse table schema
         fields = [
             (
                 f'"{col}" Nullable({get_clickhouse_type_for_dataframe(dtype=df[col].dtype, col_name=col)})'
-                if col == "Username"
+                if col == "Policy Name"
                 else f'"{col}" {get_clickhouse_type_for_dataframe(dtype=df[col].dtype, col_name=col)}'
             )
             for col in df.columns

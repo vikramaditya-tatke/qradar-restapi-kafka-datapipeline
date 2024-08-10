@@ -28,12 +28,8 @@ def starter(event_processor, customer_name):
         search_params.append(
             (event_processor[0], customer_name[0], query, qradar_connector)
         )
-    # for param in search_params:
-    #     result = search_executor(param)
-    #     etl(session=session, search_params=result, base_url=base_url["console_3"])
     with ThreadPoolExecutor(max_workers=len(queries)) as executor:
         futures = executor.map(search_executor, search_params)
-
     # ETL for concurrently fetched results
     for result in futures:
         etl(session=session, search_params=result, base_url=base_url["console_3"])

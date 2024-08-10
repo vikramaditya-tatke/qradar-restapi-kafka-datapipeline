@@ -117,7 +117,7 @@ class QRadarConnector:
 
         url = f"{self.base_url}/api/ariel/searches"
         params = {"query_expression": query_expression}
-        response = self._make_request(method="POST", url=url, json=params)
+        response = self._make_request(method="POST", url=url, params=params)
         if response:
             return response.json()
 
@@ -135,7 +135,7 @@ class QRadarConnector:
         response = self._make_request(
             "GET",
             url,
-            # headers=headers,
+            headers=headers,
         )
         if response:
             return response.json()
