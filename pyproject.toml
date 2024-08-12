@@ -27,10 +27,14 @@ black = "^24.4.2"
 pylint = "^3.2.5"
 prettier = "^0.0.7"
 clickhouse-connect = "^0.7.16"
-sentry-sdk = {extras = ["clickhouse-driver"], version = "^2.11.0"}
+sentry-sdk = { extras = ["clickhouse-driver"], version = "^2.11.0" }
 clickhouse-driver = "^0.2.8"
 
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"

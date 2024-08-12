@@ -225,44 +225,6 @@ def get_clickhouse_type_for_dataframe(dtype, col_name: str = None) -> str:
     )  # Default to String if not found in the map
 
 
-def get_clickhouse_type_for_dict(value):
-    if value in ["Source IP", "Destination IP"]:
-        return "IPv4"
-    elif value in ["Event Count", "Bytes Sent", "Bytes Received"]:
-        return "Int64"
-    elif value in ["Source Port", "Destination Port", "Domain"]:
-        return "UInt16"
-    elif value in ["Start Time"]:
-        return "DateTime64(3)"
-    elif value in ["ReportDate", "WeekFrom"]:
-        return "Date"
-    elif value not in ["Process Name", "Error Code", "Username", "Policy Name"]:
-        return "LowCardinality(String)"
-    else:
-        return "String"
-
-
-def transform_raw(data: List[Dict[str, Any]]):
-    field_names = data[0].keys()
-    rows = [tuple(row[field] for field in field_names) for row in data]
-    fields = [
-        (
-            f'"{key}" Nullable({get_clickhouse_type_for_dict(key)})'
-            if key == "Policy Name"
-            else f'"{key}" {get_clickhouse_type_for_dict(key)}'
-        )
-        for key in field_names
-    ]
-
-    # Generate summing fields for the ORDER BY clause (custom logic)
-    summing_fields = [
-        f'toStartOfHour("{key}")' if key == "Start Time" else f'"{key}"'
-        for key in field_names
-        if key != "Event Count"
-    ]
-    return rows, summing_fields, fields
-
-
 def transform_to_dataframe(
     data: List[Dict[str, Any]]
 ) -> Tuple[pd.DataFrame, List[str], List[str]]:
@@ -296,3 +258,57 @@ def transform_to_dataframe(
     except Exception as e:
         print(f"Transformation failed: {e}")
         raise
+
+
+def get_clickhouse_type_for_dict(value: str) -> str:
+    """
+
+    Args:
+        value: Column name to get the data type
+
+    Returns:
+        datatype: ClickHouse data type
+    """
+    if value in ["Source IP", "Destination IP"]:
+        return "IPv4"
+    elif value in ["Event Count", "Bytes Sent", "Bytes Received"]:
+        return "Int64"
+    elif value in ["Source Port", "Destination Port", "Domain"]:
+        return "UInt16"
+    elif value in ["Start Time"]:
+        return "DateTime64(3)"
+    elif value in ["ReportDate", "WeekFrom"]:
+        return "Date"
+    elif value not in ["Process Name", "Error Code", "Username", "Policy Name"]:
+        return "LowCardinality(String)"
+    else:
+        return "String"
+
+
+def transform_raw(data: List[Dict[str, Any]]):
+    """
+
+    Args:
+        data: List of dictionaries.
+
+    Returns:
+        rows, summing_fields, fields: Rows of data to be inserted, ORDER BY fields, SELECT fields
+    """
+    field_names = data[0].keys()
+    rows = [tuple(row[field] for field in field_names) for row in data]
+    fields = [
+        (
+            f'"{key}" Nullable({get_clickhouse_type_for_dict(key)})'
+            if key == "Policy Name"
+            else f'"{key}" {get_clickhouse_type_for_dict(key)}'
+        )
+        for key in field_names
+    ]
+
+    # Generate summing fields for the ORDER BY clause (custom logic)
+    summing_fields = [
+        f'toStartOfHour("{key}")' if key == "Start Time" else f'"{key}"'
+        for key in field_names
+        if key != "Event Count"
+    ]
+    return rows, summing_fields, fields
