@@ -236,8 +236,8 @@ def get_clickhouse_type_for_dict(value):
         return "DateTime64(3)"
     elif value in ["ReportDate", "WeekFrom"]:
         return "Date"
-    elif value not in ["Process Name", "Error Code", "Username", "Policy Name"]:
-        return "LowCardinality(String)"
+    # elif value not in ["Process Name", "Error Code", "Username", "Policy Name"]:
+    #     return "LowCardinality(String)"
     else:
         return "String"
 
@@ -248,8 +248,8 @@ def transform_raw(data: List[Dict[str, Any]]):
     fields = [
         (
             f'"{key}" Nullable({get_clickhouse_type_for_dict(key)})'
-            if key == "Policy Name"
-            else f'"{key}" {get_clickhouse_type_for_dict(key)}'
+            # if key == "Policy Name"
+            # else f'"{key}" {get_clickhouse_type_for_dict(key)}'
         )
         for key in field_names
     ]

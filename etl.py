@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import time
 from typing import Generator, Tuple, List, Dict, Any
 
@@ -12,10 +11,10 @@ from tqdm import tqdm
 from clickhouse import clickhouse, helpers
 from clickhouse.clickhouse import process_batch_async
 from mykafka.producer import create_producer
-from settings import settings
 
 # Set up a basic logger
-logger = logging.getLogger(__name__)
+from pipeline_logger import logger
+from settings import settings
 
 
 # TODO: Fix the IncompleteJSONError at `for event in ijson.items(response.raw, parser_key)`
@@ -39,7 +38,7 @@ def _parse_qradar_data(
 def initialize_progress_bar(search_params) -> tqdm:
     return tqdm(
         total=search_params["response_header"]["record_count"],
-        desc=f"Receiving data for {search_params['customer_name']} {search_params['query']['query_name']} {search_params['response_header']['cursor_id']} {search_params['event_processor']}",
+        desc=f"Receiving data for {search_params['customer_name']} {search_params['event_processor']} {search_params['query']['query_name']} {search_params['response_header']['cursor_id']}",
     )
 
 
@@ -120,10 +119,9 @@ def etl(
     try:
         with session.get(
             url=f"{base_url}/api/ariel/searches/{search_params['response_header']['cursor_id']}/results",
-            # headers={
-            #     "SEC": settings.console_3_token,
-            #     "Range": f"items={current_record_count}-{search_params['response_header']['record_count']}",
-            # },
+            headers={
+                "Range": f"items={current_record_count}-{search_params['response_header']['record_count']}",
+            },
             stream=True,
             verify=False,
         ) as response:
@@ -158,11 +156,12 @@ def etl(
                 rows, _, _ = transform(batch)
                 asyncio.run(process_batch_async(rows, click_house_table_name))
             stop = time.perf_counter()
-            print(
-                f'ROWS: {search_params["response_header"]["record_count"]}, COMPRESSION: {settings.clickhouse_compression_protocol}, BATCH_SIZE: {settings.clickhouse_batch_size}'
-            )
-            print(
-                f'Ingestion speed: {search_params["response_header"]["record_count"]/(stop - start)} rows/sec'
+            search_params["batch_size"] = settings.clickhouse_batch_size
+            search_params["data_ingestion_time"] = (stop - start) / 60 / 60
+            qradar_log = search_params.pop("response_header")
+            logger.info(
+                "Search Results Ingested",
+                extra={"ApplicationLog": search_params, "QRadarLog": qradar_log},
             )
             # Insert into Kafka
             # extract_and_produce_to_kafka(

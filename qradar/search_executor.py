@@ -6,10 +6,6 @@ from qradar.query_builder import get_search_params
 from settings import settings
 
 
-# TODO: Correctly handle the situation where a valid search id is not found after multiple polling attempts and start a
-# new search.
-
-
 @retry(
     stop=stop_after_attempt(settings.max_attempts),
     wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -23,47 +19,94 @@ def search_executor(search_params):
     Performs a QRadar search with retry mechanism and detailed logging.
     Creates a process for each console.
     """
-    logger.info(
-        f"event_processor: {search_params[0]}, customer_name: {search_params[1]}, query: {search_params[2][0]}"
-    )
-    qradar_connector = search_params[3]
-    search_params, split_query = get_search_params(search_params)
-    logger.debug("Generated search parameters")
-    query_expression = search_params["query"]["query_expression"]
-    retry_attempt = 0
-    polling_response_header = None
+    event_processor, customer_name, query, qradar_connector = search_params
+    search_response = {}
     try:
-        search = qradar_connector.trigger_search(query_expression)
-        logger.info("Search Triggered")
-        cursor_id = search["cursor_id"]
-        while retry_attempt < settings.max_attempts:
-            retry_attempt += 1
-            polling_response_header = qradar_connector.get_search_status(cursor_id)
-            logger.info(f"Polling with cursor ID: {cursor_id}")
-            if polling_response_header and polling_response_header["completed"]:
-                logger.info("Search Completed")
-                break
-            else:
-                logger.debug("Search still in progress...")
+        search_params, split_query = get_search_params(
+            (event_processor, customer_name, query, qradar_connector)
+        )
+        logger.debug(
+            "Generated search parameters",
+            extra={
+                "ApplicationLog": search_params,
+                "QRadarLog": search_response,
+            },
+        )
 
-        if polling_response_header:
-            logger.info(f"Getting QRadar Table Name for {cursor_id}")
-            parser_key_response_header = qradar_connector.get_parser_key(
-                polling_response_header
+        search_response = qradar_connector.trigger_search(
+            search_params["query"]["query_expression"]
+        )
+        logger.info(
+            "Search Triggered",
+            extra={
+                "ApplicationLog": search_params,
+                "QRadarLog": search_response,
+            },
+        )
+
+        cursor_id = search_response["cursor_id"]
+        search_params["attempt"] = 0
+
+        while search_params["attempt"] < settings.max_attempts:
+            search_params["attempt"] += 1
+            polling_response_header = qradar_connector.get_search_status(cursor_id)
+            logger.info(
+                "Search Status Polling",
+                extra={
+                    "ApplicationLog": search_params,
+                    "QRadarLog": search_response,
+                },
             )
-            for key, value in parser_key_response_header.items():
-                search_params["parser_key"] = key
-                search_params["response_header"] = value
-            return search_params
-        else:
-            logger.warning(f"Search failed after maximum attempts for {cursor_id}")
-    except (
-        requests.exceptions.ReadTimeout,
-        requests.exceptions.ConnectTimeout,
-        requests.exceptions.ConnectionError,
-        requests.exceptions.TooManyRedirects,
-        requests.exceptions.HTTPError,
-    ):
-        logger.exception("Error occurred while polling for search status")
+
+            if polling_response_header and polling_response_header["completed"]:
+                logger.info(
+                    "Search Completed",
+                    extra={
+                        "ApplicationLog": search_params,
+                        "QRadarLog": search_response,
+                    },
+                )
+                return _handle_successful_search(
+                    polling_response_header, search_params, qradar_connector
+                )
+
+            logger.info(
+                "Search Running",
+                extra={"ApplicationLog": search_params, "QRadarLog": search_response},
+            )
+
+        logger.warning(
+            "Search Failed",
+            extra={"ApplicationLog": search_params, "QRadarLog": search_response},
+        )
+        return None
+
+    except requests.exceptions.RequestException as e:
+        logger.exception(
+            "Search Error",
+            extra={"ApplicationLog": search_params, "QRadarLog": search_response},
+        )
     except Exception as e:
-        logger.exception(f"Error during QRadar search: {e}")
+        logger.exception(f"Unexpected error during QRadar search: {e}")
+
+
+def _handle_successful_search(search_response, search_params, qradar_connector):
+    """Handles the successful completion of a search."""
+    try:
+        parser_key_response_header = qradar_connector.get_parser_key(search_response)
+        for key, value in parser_key_response_header.items():
+            search_params["parser_key"] = key
+            search_params["response_header"] = value
+        logger.info(
+            "Search Table Retrieved",
+            extra={"ApplicationLog": search_params, "QRadarLog": search_response},
+        )
+        return search_params
+
+    except Exception as e:
+        logger.error(
+            "Search Result Processing Error",
+            exc_info=True,
+            extra={"ApplicationLog": search_params, "QRadarLog": search_response},
+        )
+        return None

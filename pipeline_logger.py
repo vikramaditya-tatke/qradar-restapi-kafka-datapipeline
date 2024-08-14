@@ -2,55 +2,85 @@ import sys
 
 import loguru
 import ujson
+from pymongo import MongoClient
+
+
+class MongoDBHandler:
+    def __init__(
+        self,
+        mongo_uri="mongodb://Vikram:M0ng0%40DBR%23%23t!@192.168.252.130:23456/?authMechanism=DEFAULT",
+        db_name="DataFetchingLogs",
+        collection_name="logs",
+    ):
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client[db_name]
+        self.collection = self.db[collection_name]
+
+    def emit(self, record):
+        try:
+            log_record = ujson.loads(record)
+            self.collection.insert_one(log_record)
+        except Exception as e:
+            logger.error(f"Failed to write log to MongoDB: {e}")
 
 
 def serialize(record) -> str:
-    """Serializes the log records and sets default contextual fields to be included in each log.
+    """Serializes the log records and merges ApplicationLog and QRadarLog into a single dictionary."""
+    flattened_extra = record["extra"].get("extra", {})
+    application_log = flattened_extra.get("ApplicationLog", {})
+    qradar_log = flattened_extra.get("QRadarLog", {})
 
-    Args:
-        record (Any): Log Record.
+    if not isinstance(application_log, dict):
+        application_log = {}
+    if not isinstance(qradar_log, dict):
+        qradar_log = {}
 
-    Returns:
-        str: JSON String of the log record.
-    """
-    subset = {
+    merged_log = {**application_log, **qradar_log}
+
+    final_log = {
         "timestamp": str(record["time"]),
         "message": record["message"],
         "level": record["level"].name,
-        "records_inserted": record["extra"].get("records_inserted"),
-        "records_found": record["extra"].get("records_found"),
-        "response_header": record["extra"].get("response_header"),
-        "domain_name": record["extra"].get("domain_name"),
-        "event_processor": record["extra"].get("event_processor"),
-        "search_id": record["extra"].get("search_id"),
-        "search_duration_start": record["extra"].get("search_duration_start"),
-        "search_duration_stop": record["extra"].get("search_duration_stop"),
+        **merged_log,
     }
-    return ujson.dumps(subset)
+
+    additional_fields = {
+        "data_ingestion_time": flattened_extra.get("data_ingestion_time"),
+        "batch_size": flattened_extra.get("batch_size"),
+    }
+
+    # Extract only the query_name from the query
+    if "query" in final_log and isinstance(final_log["query"], dict):
+        final_log["query_name"] = final_log["query"].get("query_name")
+
+    final_log.update({k: v for k, v in additional_fields.items() if v is not None})
+
+    return ujson.dumps(final_log)
 
 
 def patching(record):
-    """Adds the serialized record to the serialized key inside the extra key of the log record.
-
-    Args:
-        record (Any): Log Record.
-    """
     record["extra"]["serialized"] = serialize(record)
 
 
 def modify_logger():
-    """Defines handles for the logger.
-
-    Returns:
-        logger: logger object of the Loguru library.
-    """
     logger = loguru.logger.patch(patching)
     logger.remove(0)
     logger.add(
         "./logs/app.log",
         format="{extra[serialized]}",
+        rotation="500 MB",
+        retention="7 days",
+        compression="zip",
+        enqueue=True,
+        catch=True,
+    )
+
+    logger.add(
+        "./logs/error.log",
+        level="ERROR",
+        format="{extra[serialized]}",
         rotation="1 day",
-        retention="1 day",
+        retention="7 days",
         enqueue=True,
     )
 
@@ -60,6 +90,12 @@ def modify_logger():
         enqueue=True,
         colorize=True,
     )
+
+    # Add MongoDB handler
+    mongo_handler = (
+        MongoDBHandler()
+    )  # You can customize the URI, db_name, and collection_name here
+    logger.add(mongo_handler.emit, format="{extra[serialized]}", enqueue=True)
     return logger
 
 
