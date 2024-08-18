@@ -18,13 +18,23 @@ class MongoDBHandler:
 
     def emit(self, record):
         try:
-            log_record = ujson.loads(record)
+            # Check if record is already serialized, if yes, then load it
+            if isinstance(record, str):
+                record = ujson.loads(record)
+
+            # Ensure the record is a dictionary
+            if not isinstance(record, dict):
+                raise ValueError("Log record must be a dictionary")
+
+            # Access the serialized data safely
+            log_record = record.get("extra", {}).get("serialized_dict", record)
             self.collection.insert_one(log_record)
         except Exception as e:
-            logger.error(f"Failed to write log to MongoDB: {e}")
+            logger.error(f"Failed to write log to MongoDB: {e}. Record: {record}")
 
 
-def serialize(record) -> str:
+# TODO: Fix serialization errors when exec_info is set to True
+def serialize(record) -> dict:
     """Serializes the log records and merges ApplicationLog and QRadarLog into a single dictionary."""
     flattened_extra = record["extra"].get("extra", {})
     application_log = flattened_extra.get("ApplicationLog", {})
@@ -49,17 +59,23 @@ def serialize(record) -> str:
         "batch_size": flattened_extra.get("batch_size"),
     }
 
-    # Extract only the query_name from the query
     if "query" in final_log and isinstance(final_log["query"], dict):
         final_log["query_name"] = final_log["query"].get("query_name")
 
     final_log.update({k: v for k, v in additional_fields.items() if v is not None})
 
-    return ujson.dumps(final_log)
+    return final_log
 
 
 def patching(record):
-    record["extra"]["serialized"] = serialize(record)
+    try:
+        serialized_dict = serialize(record)
+        # Ensure the 'extra' field exists
+        record.setdefault("extra", {})
+        record["extra"]["serialized_dict"] = serialized_dict
+        record["extra"]["serialized"] = ujson.dumps(serialized_dict)
+    except Exception as e:
+        logger.error(f"Failed to serialize record: {e}. Record: {record}")
 
 
 def modify_logger():

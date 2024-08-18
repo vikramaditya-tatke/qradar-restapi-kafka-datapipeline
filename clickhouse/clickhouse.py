@@ -1,4 +1,6 @@
 import clickhouse_connect
+import clickhouse_connect.driver
+import clickhouse_connect.driver.exceptions
 import requests
 from clickhouse_connect.driver import Client, AsyncClient
 from tenacity import stop_after_attempt, wait_exponential, retry
@@ -52,7 +54,7 @@ def create_summing_merge_tree_table(click_house_table_name, fields, summing_fiel
             CREATE TABLE IF NOT EXISTS {click_house_table_name} (
                 {", ".join(fields)}
             ) ENGINE = SummingMergeTree()
-            PARTITION BY toYYYYMMDD((WeekFrom))
+            PARTITION BY (WeekFrom)
             ORDER BY tuple(
                 {", ".join(summing_fields)}
             )
@@ -60,8 +62,9 @@ def create_summing_merge_tree_table(click_house_table_name, fields, summing_fiel
         """
     try:
         client.command(create_table_query)
-    except Exception as e:
-        logger.exception("Error occurred while creating ClickHouse Table")
+    except clickhouse_connect.driver.exceptions.DatabaseError as e:
+        logger.error("ClickHouse Table Creation Failed")
+        raise
     finally:
         client.close()
 
@@ -87,17 +90,29 @@ def load_rows_using_summing_merge_tree(click_house_table_name, client: Client, r
     client.insert(click_house_table_name, rows)
 
 
+# TODO: Handle the clickhouse_connect.driver.exceptions.DataError
+
+
 async def load_rows_async_using_summing_merge_tree(click_house_table_name, rows):
-    client = await create_async_clickhouse_client()
-    await client.insert(click_house_table_name, rows)
-    client.close()
+    try:
+        client = await create_async_clickhouse_client()
+        await client.insert(click_house_table_name, rows)
+        client.close()
+    except Exception as e:
+        print(e)
+        raise
 
 
 async def process_batch_async(rows, click_house_table_name):
-    await load_rows_async_using_summing_merge_tree(
-        click_house_table_name,
-        rows,
-    )
+    try:
+        await load_rows_async_using_summing_merge_tree(
+            click_house_table_name,
+            rows,
+        )
+    except clickhouse_connect.driver.exceptions.DataError:
+        raise
+    except Exception:
+        raise
 
 
 @retry(

@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     clickhouse_password: str
     clickhouse_port: int
     clickhouse_user: str
+    max_queries_per_event_processor: int
+    max_event_processors_engaged: int
     model_config = SettingsConfigDict(env_file=".env")
 
 

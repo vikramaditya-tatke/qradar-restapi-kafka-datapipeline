@@ -26,6 +26,7 @@ def rename_event(event):
         "eventcount": "Event Count",
         "sourceip": "Source IP",
         "starttime": "Start Time",
+        "startTime": "Start Time",
         "Time": "Start Time",
         "qid": "QID",
         "SUM_eventCount": "Event Count",
@@ -49,7 +50,7 @@ def rename_event(event):
         "destinationGeographicLocation": "Destination Geographic Country/Region",
         "sourceGeographicLocation": "Source Geographic Country/Region",
         "destinationPort": "Destination Port",
-        "Source Port": "Source Port",
+        "sourcePort": "Source Port",
         "CustomProperty~null": "bad_key",
     }
 
@@ -78,13 +79,17 @@ def add_date(line_json):
         raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
 
     # Determine timestamp type (milliseconds or seconds) and adjust if needed
-    query_timestamp = (
-        query_date_epoch / 1000 if query_date_epoch > 1e10 else query_date_epoch
-    )
+    if query_date_epoch > 1e10:
+        query_timestamp = query_date_epoch / 1000
+    else:
+        query_timestamp = query_date_epoch
+        line_json["Start Time"] = (
+            query_date_epoch * 1000
+        )  # Converting epoch to epoch milliseconds.
 
     base_date = datetime.fromtimestamp(query_timestamp)
     previous_saturday = base_date + relativedelta(weekday=SA(-1))
-
+    line_json["Event Count"] = int(line_json["Event Count"])
     line_json["WeekFrom"] = previous_saturday.date()
     line_json["ReportDate"] = base_date.date()
 
@@ -228,38 +233,74 @@ def get_clickhouse_type_for_dataframe(dtype, col_name: str = None) -> str:
 def get_clickhouse_type_for_dict(value):
     if value in ["Source IP", "Destination IP"]:
         return "IPv4"
-    elif value in ["Event Count", "Bytes Sent", "Bytes Received"]:
-        return "Int64"
+    elif value in ["Event Count", "Bytes Sent", "Bytes Received", "QID"]:
+        return "UInt64"
     elif value in ["Source Port", "Destination Port", "Domain"]:
         return "UInt16"
-    elif value in ["Start Time"]:
+    elif value in ["Domain", "Magnitude"]:
+        return "UInt8"
+    if value in ["Start Time"]:
         return "DateTime64(3)"
     elif value in ["ReportDate", "WeekFrom"]:
         return "Date"
-    # elif value not in ["Process Name", "Error Code", "Username", "Policy Name"]:
-    #     return "LowCardinality(String)"
+    elif value in [
+        "Username",
+        "Error Code",
+        "Threat Name",
+        "Source Hostname",
+        "Event ID",
+        "Logon Type",
+        "Source Workstation",
+        "Process Name",
+        "Policy Name",
+        "Category Description",
+        "URL domain",
+        "bad_key",
+        "Sender",
+        "Recipient",
+        "Command",
+        "Affected Workload",
+        "Application Name",
+        "Account Security ID",
+    ]:
+        return "Nullable(String)"
     else:
-        return "String"
+        return "LowCardinality(String)"
 
 
-def transform_raw(data: List[Dict[str, Any]]):
-    field_names = data[0].keys()
-    rows = [tuple(row[field] for field in field_names) for row in data]
-    fields = [
-        (
-            f'"{key}" Nullable({get_clickhouse_type_for_dict(key)})'
-            # if key == "Policy Name"
-            # else f'"{key}" {get_clickhouse_type_for_dict(key)}'
-        )
-        for key in field_names
-    ]
+def transform_raw(
+    data: List[Dict[str, Any]],
+    query_name: str,
+) -> tuple[list[tuple[Any, ...]], list[str], list[str]]:
+    field_names = list(data[0].keys())  # Get the list of field names from the data
+    rows = [tuple(row[field] for field in field_names) for row in data]  # Create rows
 
-    # Generate summing fields for the ORDER BY clause (custom logic)
+    # Define fields for table creation with appropriate ClickHouse types
+    fields = [f'"{key}" {get_clickhouse_type_for_dict(key)}' for key in field_names]
+
+    # Define summing fields with custom logic based on query_name
+    if query_name == "AllowedOutboundTraffic":
+        custom_order = ["WeekFrom", "Destination IP"]
+    elif query_name == "AllowedInboundTraffic":
+        custom_order = ["WeekFrom", "Source IP"]
+    elif query_name == "TopSecurityEvents":
+        custom_order = ["WeekFrom", "High Level Category", "Event Name"]
+    elif query_name in ["AuthenticationFailure", "AuthenticationSuccess"]:
+        custom_order = ["WeekFrom", "Username"]
+    else:
+        custom_order = ["WeekFrom"]
+
+    # Create the summing_fields with custom order first, then the rest
     summing_fields = [
         f'toStartOfHour("{key}")' if key == "Start Time" else f'"{key}"'
+        for key in custom_order
+        if key in field_names
+    ] + [
+        f'toStartOfHour("{key}")' if key == "Start Time" else f'"{key}"'
         for key in field_names
-        if key != "Event Count"
+        if key not in custom_order and key != "Event Count"
     ]
+
     return rows, summing_fields, fields
 
 

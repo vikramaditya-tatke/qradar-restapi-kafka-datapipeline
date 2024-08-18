@@ -86,6 +86,7 @@ def search_executor(search_params):
             "Search Error",
             extra={"ApplicationLog": search_params, "QRadarLog": search_response},
         )
+        raise
     except Exception as e:
         logger.exception(f"Unexpected error during QRadar search: {e}")
 

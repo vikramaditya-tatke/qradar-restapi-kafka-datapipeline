@@ -2,22 +2,146 @@ import asyncio
 import time
 from typing import Generator, Tuple, List, Dict, Any
 
+import clickhouse_connect
 import ijson
 import requests
-import ujson
 from requests.exceptions import HTTPError
 from tqdm import tqdm
 
 from clickhouse import clickhouse, helpers
 from clickhouse.clickhouse import process_batch_async
-from mykafka.producer import create_producer
-
 # Set up a basic logger
 from pipeline_logger import logger
 from settings import settings
 
 
-# TODO: Fix the IncompleteJSONError at `for event in ijson.items(response.raw, parser_key)`
+class ETLPipeline:
+    def __init__(
+        self, session: requests.Session, search_params: Dict[str, Any], base_url: str
+    ):
+        self.session = session
+        self.search_params = search_params
+        self.base_url = base_url
+        self.customer_name = self._sanitize_customer_name(
+            search_params["customer_name"]
+        )
+        self.query_name = search_params["query"]["query_name"]
+        self.click_house_table_name = f"{self.customer_name}_{self.query_name}"
+        self.progress_bar = None
+
+    @staticmethod
+    def _sanitize_customer_name(customer_name: str) -> str:
+        return (
+            customer_name.replace(" ", "")
+            .replace("'", "")
+            .replace('"', "")
+            .replace("&", "")
+            .replace("_", "")
+        )
+
+    def extract(self) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
+        try:
+            current_record_count = 0
+            response = self.session.get(
+                url=f"{self.base_url}/api/ariel/searches/{self.search_params['response_header']['cursor_id']}/results",
+                headers={
+                    "Range": f"items={current_record_count}-{self.search_params['response_header']['record_count']}",
+                },
+                stream=True,
+                verify=False,
+            )
+            response.raise_for_status()
+            self.progress_bar = self._initialize_progress_bar()
+            batch_generator = self._extract_batches(
+                response, self.search_params["parser_key"]
+            )
+            return batch_generator
+        except HTTPError as http_err:
+            logger.error(f"HTTP error occurred: {http_err}")
+            raise
+        except Exception as err:
+            logger.error(f"An unexpected error occurred during extraction: {err}")
+            raise
+
+    def _initialize_progress_bar(self) -> tqdm:
+        return tqdm(
+            total=self.search_params["response_header"]["record_count"],
+            desc=f"Receiving data for {self.search_params['customer_name']} {self.search_params['event_processor']} {self.search_params['query']['query_name']} {self.search_params['response_header']['cursor_id']}",
+        )
+
+    def _extract_batches(
+        self, response: requests.Response, parser_key: str
+    ) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
+        batch = []
+        current_record_count = 0
+        for event in _parse_qradar_data(
+            response, parser_key
+        ):  # Use the method within the class
+            current_record_count += 1
+            self.progress_bar.update()
+            batch.append(event)
+
+            if len(batch) >= settings.clickhouse_batch_size:
+                yield batch, current_record_count
+                batch = []
+        if batch:
+            yield batch, current_record_count
+
+    def transform(
+        self, batch: List[Dict[str, Any]]
+    ) -> Tuple[Any, List[str], List[str]]:
+        return helpers.transform_raw(batch, self.search_params["query"]["query_name"])
+
+    def load(self, rows: Any) -> None:
+        try:
+            asyncio.run(process_batch_async(rows, self.click_house_table_name))
+        except clickhouse_connect.driver.exceptions.DataError as data_err:
+            logger.error(f"Data type mismatch error in ClickHouse: {data_err}")
+            raise
+        except clickhouse_connect.driver.exceptions.DatabaseError as db_err:
+            logger.error(f"Database error in ClickHouse: {db_err}")
+            raise
+        except Exception as load_err:
+            logger.error(f"An unexpected error occurred during loading: {load_err}")
+            raise
+
+    def run(self) -> None:
+        try:
+            batch_generator = self.extract()
+
+            # Create the table before processing batches
+            first_batch, _ = next(batch_generator)
+            rows, summing_fields, fields = self.transform(first_batch)
+            clickhouse.create_summing_merge_tree_table(
+                self.click_house_table_name, fields, summing_fields
+            )
+
+            # Process the first batch
+            self.load(rows)
+
+            # Process subsequent batches
+            start = time.perf_counter()
+            for batch, current_record_count in batch_generator:
+                rows, _, _ = self.transform(batch)
+                self.load(rows)
+            stop = time.perf_counter()
+
+            self.search_params["batch_size"] = settings.clickhouse_batch_size
+            self.search_params["data_ingestion_time"] = (stop - start) / 60 / 60
+            qradar_log = self.search_params.pop("response_header")
+            logger.info(
+                "Search Results Ingested",
+                extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
+            )
+
+            if self.progress_bar:
+                self.progress_bar.close()
+
+        except Exception as general_err:
+            logger.error(f"ETL failed: {general_err}")
+            raise
+
+
 def _parse_qradar_data(
     response: requests.Response, parser_key: str
 ) -> Generator[Dict[str, Any], None, None]:
@@ -32,209 +156,14 @@ def _parse_qradar_data(
         logger.error(f"Error parsing QRadar data: {ij}")
 
 
-# TODO: Re-enable the progress bar.
-
-
-def initialize_progress_bar(search_params) -> tqdm:
-    return tqdm(
-        total=search_params["response_header"]["record_count"],
-        desc=f"Receiving data for {search_params['customer_name']} {search_params['event_processor']} {search_params['query']['query_name']} {search_params['response_header']['cursor_id']}",
-    )
-
-
-def extract(
-    response: requests.Response,
-    progress_bar: tqdm,
-    parser_key: str,
-) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
-    batch = []
-    current_record_count = 0
-    for event in _parse_qradar_data(response, parser_key):
-        current_record_count += 1
-        progress_bar.update()
-        batch.append(event)
-
-        if len(batch) >= settings.clickhouse_batch_size:
-            yield batch, current_record_count
-            batch = []
-    if batch:
-        yield batch, current_record_count
-
-
-def extract_str_batch(
-    response: requests.Response,
-    progress_bar: tqdm,
-    parser_key: str,
-) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
-    batch = []
-    current_record_count = 0
-    for event in _parse_qradar_data(response, parser_key):
-        current_record_count += 1
-        progress_bar.update()
-        str_event = ujson.dumps(event)
-        batch.append(str_event)
-
-        if len(batch) >= settings.clickhouse_batch_size:
-            str_batch = "\n".join(batch)
-            yield batch, str_batch, current_record_count
-            batch = []
-    if batch:
-        str_batch = "\n".join(batch)
-        yield batch, str_batch, current_record_count
-
-
-# TODO: Implement proper error handling
-def extract_and_produce_to_kafka(
-    response: requests.Response,
-    progress_bar: tqdm,
-    parser_key: str,
-) -> None:
-    producer = create_producer()
-    current_record_count = 0
-    try:
-        for event in _parse_qradar_data(response, parser_key):
-            current_record_count += 1
-            progress_bar.update()
-            str_event = ujson.dumps(event)
-            producer.produce(topic="demo_cluster", value=str_event)
-        producer.flush()
-        progress_bar.close()
-    except Exception as e:
-        logger.error(f"HTTP error occurred: {e}")
-
-
-def transform(batch: List[Dict[str, Any]]) -> Tuple[Any, List[str], List[str]]:
-    # return helpers.transform_to_arrow(batch)
-    # return helpers.transform_to_dataframe(batch)
-    return helpers.transform_raw(batch)
-
-
-# TODO: Re-enable the headers and upload to confluent cloud.
-
-
 def etl(
     session: requests.Session, search_params: Dict[str, Any], base_url: str
 ) -> None:
-    current_record_count = 0
     try:
-        with session.get(
-            url=f"{base_url}/api/ariel/searches/{search_params['response_header']['cursor_id']}/results",
-            headers={
-                "Range": f"items={current_record_count}-{search_params['response_header']['record_count']}",
-            },
-            stream=True,
-            verify=False,
-        ) as response:
-            response.raise_for_status()
-            customer_name = (
-                search_params["customer_name"]
-                .replace(" ", "")
-                .replace("'", "")
-                .replace('"', "")
-                .replace("&", "")
-                .replace("_", "")
-            )
-            query_name = search_params["query"]["query_name"]
-            click_house_table_name = f"{customer_name}_{query_name}"
-            progress_bar = initialize_progress_bar(search_params)
-
-            # Create the table before processing batches
-            batch_generator = extract(
-                response, progress_bar, search_params["parser_key"]
-            )
-            first_batch, _ = next(batch_generator)
-            rows, summing_fields, fields = transform(first_batch)
-            clickhouse.create_summing_merge_tree_table(
-                click_house_table_name, fields, summing_fields
-            )
-
-            # Process the first batch
-            asyncio.run(process_batch_async(rows, click_house_table_name))
-            # Process subsequent batches as they are yielded
-            start = time.perf_counter()
-            for batch, current_record_count in batch_generator:
-                rows, _, _ = transform(batch)
-                asyncio.run(process_batch_async(rows, click_house_table_name))
-            stop = time.perf_counter()
-            search_params["batch_size"] = settings.clickhouse_batch_size
-            search_params["data_ingestion_time"] = (stop - start) / 60 / 60
-            qradar_log = search_params.pop("response_header")
-            logger.info(
-                "Search Results Ingested",
-                extra={"ApplicationLog": search_params, "QRadarLog": qradar_log},
-            )
-            # Insert into Kafka
-            # extract_and_produce_to_kafka(
-            #     response,
-            #     progress_bar,
-            #     search_params["parser_key"],
-            # )
-
-            # Insert Arrow
-            # for batch, current_record_count in extract(
-            #     response,
-            #     progress_bar,
-            #     search_params["parser_key"],
-            # ):
-            #     arrow_table, summing_fields, fields = transform(batch)
-            #     clickhouse.create_clickhouse_table(
-            #         click_house_table_name, client, fields, summing_fields
-            #     )
-            #     clickhouse.load_arrow_using_summing_merge_tree(
-            #         click_house_table_name, client, arrow_table
-            #     )
-
-            # Insert Dataframe
-            # for batch, current_record_count in extract(
-            #     response,
-            #     progress_bar,
-            #     search_params["parser_key"],
-            # ):
-            #     dataframe, summing_fields, fields = transform(batch)
-            #     clickhouse.create_summing_merge_tree_table(
-            #         click_house_table_name, fields, client, summing_fields
-            #     )
-            #     clickhouse.load_dataframe_using_summing_merge_tree(
-            #         click_house_table_name, client, dataframe
-            #     )
-
-            # Insert rows
-            # for batch, current_record_count in extract(
-            #     response,
-            #     progress_bar,
-            #     search_params["parser_key"],
-            # ):
-            #     rows, summing_fields, fields = transform(batch)
-            #     clickhouse.create_summing_merge_tree_table(
-            #         click_house_table_name, fields, client, summing_fields
-            #     )
-            #     clickhouse.load_rows_using_summing_merge_tree(
-            #         click_house_table_name,
-            #         client,
-            #         rows,
-            #     )
-
-            # Load JSON using POST
-            # for batch, str_batch, current_record_count in extract_str_batch(
-            #     response,
-            #     progress_bar,
-            #     search_params["parser_key"],
-            # ):
-            #     rows, summing_fields, fields = transform(batch)
-            #     clickhouse.create_summing_merge_tree_table(
-            #         click_house_table_name, fields, client, summing_fields
-            #     )
-            #     clickhouse.load_json_using_summing_merge_tree(
-            #         click_house_table_name, str_batch
-            #     )
-
-            progress_bar.close()
-    except HTTPError as http_err:
-        logger.error(f"HTTP error occurred: {http_err}")
-        raise
+        pipeline = ETLPipeline(session, search_params, base_url)
+        pipeline.run()
     except Exception as err:
-        logger.error(f"An error occurred: {err}")
-        raise
+        print(err)
 
 
 # @retry(
@@ -245,6 +174,72 @@ def etl(
 #     ),
 #     reraise=True,  # Reraise the final exception
 # )
-def etl_with_retry(
-    session: requests.Session, search_params: Dict[str, Any], base_url: str
-) -> None: ...
+# def etl_with_retry(
+#     session: requests.Session, search_params: Dict[str, Any], base_url: str
+# ) -> None: ...
+
+
+# Insert into Kafka
+# extract_and_produce_to_kafka(
+#     response,
+#     progress_bar,
+#     search_params["parser_key"],
+# )
+
+# Insert Arrow
+# for batch, current_record_count in extract(
+#     response,
+#     progress_bar,
+#     search_params["parser_key"],
+# ):
+#     arrow_table, summing_fields, fields = transform(batch)
+#     clickhouse.create_clickhouse_table(
+#         click_house_table_name, client, fields, summing_fields
+#     )
+#     clickhouse.load_arrow_using_summing_merge_tree(
+#         click_house_table_name, client, arrow_table
+#     )
+
+# Insert Dataframe
+# for batch, current_record_count in extract(
+#     response,
+#     progress_bar,
+#     search_params["parser_key"],
+# ):
+#     dataframe, summing_fields, fields = transform(batch)
+#     clickhouse.create_summing_merge_tree_table(
+#         click_house_table_name, fields, client, summing_fields
+#     )
+#     clickhouse.load_dataframe_using_summing_merge_tree(
+#         click_house_table_name, client, dataframe
+#     )
+
+# Insert rows
+# for batch, current_record_count in extract(
+#     response,
+#     progress_bar,
+#     search_params["parser_key"],
+# ):
+#     rows, summing_fields, fields = transform(batch)
+#     clickhouse.create_summing_merge_tree_table(
+#         click_house_table_name, fields, client, summing_fields
+#     )
+#     clickhouse.load_rows_using_summing_merge_tree(
+#         click_house_table_name,
+#         client,
+#         rows
+#     )
+
+# Load JSON using POST
+# for batch, str_batch, current_record_count in extract_str_batch(
+#     response,
+#     progress_bar,
+#     search_params["parser_key"],
+# ):
+#     rows, summing_fields, fields = transform(batch)
+#     clickhouse.create_summing_merge_tree_table(
+#         click_house_table_name, fields, client, summing_fields
+#     )
+#     clickhouse.load_json_using_summing_merge_tree(
+#         click_house_table_name, str_batch
+#     )
