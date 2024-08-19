@@ -1,10 +1,13 @@
+from typing import Generator, Dict, Any
+
 import ijson
 import requests
 from requests import Session, Response
-from requests.exceptions import RequestException, HTTPError, ReadTimeout
+from requests.exceptions import HTTPError, ReadTimeout
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 
+from clickhouse.helpers import rename_event, add_date
 from settings import settings
 
 # Disable warnings about insecure HTTPS requests (if using self-signed certs, for example)
@@ -47,22 +50,13 @@ class QRadarConnector:
             )
             response.raise_for_status()  # Raise an exception for HTTP errors
             return response
-        except HTTPError as http_err:
+        except HTTPError:
             # Log specific HTTP errors
-            if 400 <= http_err.response.status_code < 500:
-                raise RequestException(
-                    f"Client Error {http_err.response.status_code}: {http_err.response.text}"
-                )
-            elif 500 <= http_err.response.status_code < 600:
-                raise RequestException(
-                    f"Server Error {http_err.response.status_code}: {http_err.response.text}"
-                )
-            else:
-                raise
+            raise
         except ReadTimeout:
-            raise RequestException("Request timed out.")
-        except Exception as err:
-            raise RequestException(f"An unexpected error occurred: {err}")
+            raise
+        except Exception:
+            raise
 
     def trigger_search(self, query_expression: dict) -> dict:
         """Triggers a QRadar search using the provided query expression.
@@ -104,12 +98,14 @@ class QRadarConnector:
         Returns:
             str: The dynamic key for parsing the JSON data.
         """
+        parser_key = None
         with self.session.get(url=url, stream=True, verify=False) as response:
             parser = ijson.parse(response.raw)
             for prefix, event, value in parser:
                 if event == "start_array":
-                    return f"{prefix}.item"
-        return None
+                    parser_key = f"{prefix}.item"
+                    break
+        return parser_key
 
     def get_parser_key(self, response_header: dict) -> dict:
         """Initiates a GET request to stream the entire search result at once.
@@ -125,3 +121,28 @@ class QRadarConnector:
         )
         parser_key = self._extract_parser_key(url)
         return {parser_key: response_header} if parser_key else None
+
+    def fetch_data(self, cursor_id: str, max_record_count: int) -> requests.Response:
+        current_record_count = 0
+        response = self.session.get(
+            url=f"{self.base_url}/api/ariel/searches/{cursor_id}/results",
+            headers={"Range": f"items={current_record_count}-{max_record_count}"},
+            stream=True,
+            verify=False,
+        )
+        response.raise_for_status()
+        return response
+
+
+def parse_qradar_data(
+    response: requests.Response, parser_key: str
+) -> Generator[Dict[str, Any], None, None]:
+    try:
+        for event in ijson.items(response.raw, parser_key):
+            transformed_event = rename_event(event)
+            transformed_event = add_date(transformed_event)
+            yield transformed_event
+    except ValueError:
+        raise
+    except ijson.common.IncompleteJSONError:
+        raise

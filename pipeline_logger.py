@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 import loguru
 import ujson
@@ -78,33 +79,97 @@ def patching(record):
         logger.error(f"Failed to serialize record: {e}. Record: {record}")
 
 
+def truncate(value, max_length):
+    return (
+        str(value)[:max_length]
+        if len(str(value)) > max_length
+        else str(value).ljust(max_length)
+    )
+
+
+def custom_format(record):
+    # Parse the serialized extra data
+    extra_data = ujson.loads(record["extra"].get("serialized", "{}"))
+
+    # Extract and truncate the fields
+    event_processor = truncate(extra_data.get("event_processor", "N/A"), 4)
+    customer_name = truncate(extra_data.get("customer_name", "N/A"), 25)
+    query_name = truncate(extra_data.get("query_name", "N/A"), 25)
+    start_time = truncate(extra_data.get("start_time", "N/A"), 20)
+    stop_time = truncate(extra_data.get("stop_time", "N/A"), 20)
+    progress = truncate(extra_data.get("progress", "N/A"), 5)
+    record_count = truncate(extra_data.get("record_count", "N/A"), 10)
+    data_ingestion_time = truncate(extra_data.get("data_ingestion_time", "N/A"), 3)
+    message = truncate(record["message"], 30)
+
+    # Format the log message
+    return (
+        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level: <5}</level> | "
+        f"<yellow>{event_processor: <3}</yellow> | "
+        f"<blue>{customer_name: <25}</blue> | "
+        f"<cyan>{query_name: <25}</cyan> | "
+        f"<magenta>{start_time: <20}</magenta> | "
+        f"<magenta>{stop_time: <20}</magenta> | "
+        f"<red>{progress: <5}</red> | "
+        f"<green>{record_count: <5}</green> | "
+        f"<yellow>{data_ingestion_time: <3}</yellow> | "
+        f"<level>{message: <30}</level> |\n"
+    )
+
+
 def modify_logger():
     logger = loguru.logger.patch(patching)
-    logger.remove(0)
+    logger.remove(0)  # Remove the default handler
+
+    # Ensure log directory exists
+    log_dir = Path("./logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Add handler for app.log
     logger.add(
-        "./logs/app.log",
+        log_dir / "app.log",
         format="{extra[serialized]}",
         rotation="500 MB",
         retention="7 days",
         compression="zip",
         enqueue=True,
         catch=True,
+        backtrace=True,
+        diagnose=True,
+        serialize=True,
+        colorize=False,
+        encoding="utf-8",
+        mode="a",
     )
 
+    # Add handler for error.log
     logger.add(
-        "./logs/error.log",
+        log_dir / "error.log",
         level="ERROR",
         format="{extra[serialized]}",
         rotation="1 day",
         retention="7 days",
+        compression="zip",
         enqueue=True,
+        catch=True,
+        backtrace=True,
+        diagnose=True,
+        serialize=True,
+        colorize=False,
+        encoding="utf-8",
+        mode="a",
     )
 
+    # Add stdout handler for debugging
     logger.add(
         sys.stdout,
         level="DEBUG",
+        format=custom_format,
         enqueue=True,
         colorize=True,
+        backtrace=True,
+        diagnose=True,
     )
 
     # Add MongoDB handler

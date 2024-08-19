@@ -3,24 +3,24 @@ import time
 from typing import Generator, Tuple, List, Dict, Any
 
 import clickhouse_connect
-import ijson
 import requests
-from requests.exceptions import HTTPError
 from tqdm import tqdm
 
 from clickhouse import clickhouse, helpers
 from clickhouse.clickhouse import process_batch_async
 # Set up a basic logger
 from pipeline_logger import logger
+from qradar.qradarconnector import parse_qradar_data
 from settings import settings
 
 
 class ETLPipeline:
     def __init__(
-        self, session: requests.Session, search_params: Dict[str, Any], base_url: str
+        self, response: requests.Response, search_params: Dict[str, Any], base_url: str
     ):
-        self.session = session
+        self.response = response
         self.search_params = search_params
+        self.search_params["batch_size"] = settings.clickhouse_batch_size
         self.base_url = base_url
         self.customer_name = self._sanitize_customer_name(
             search_params["customer_name"]
@@ -28,6 +28,12 @@ class ETLPipeline:
         self.query_name = search_params["query"]["query_name"]
         self.click_house_table_name = f"{self.customer_name}_{self.query_name}"
         self.progress_bar = None
+
+    def _initialize_progress_bar(self) -> tqdm:
+        return tqdm(
+            total=self.search_params["response_header"]["record_count"],
+            desc=f"Receiving data for {self.search_params['customer_name']} {self.search_params['event_processor']} {self.search_params['query']['query_name']} {self.search_params['response_header']['cursor_id']}",
+        )
 
     @staticmethod
     def _sanitize_customer_name(customer_name: str) -> str:
@@ -39,43 +45,40 @@ class ETLPipeline:
             .replace("_", "")
         )
 
-    def extract(self) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
-        try:
-            current_record_count = 0
-            response = self.session.get(
-                url=f"{self.base_url}/api/ariel/searches/{self.search_params['response_header']['cursor_id']}/results",
-                headers={
-                    "Range": f"items={current_record_count}-{self.search_params['response_header']['record_count']}",
-                },
-                stream=True,
-                verify=False,
-            )
-            response.raise_for_status()
-            self.progress_bar = self._initialize_progress_bar()
-            batch_generator = self._extract_batches(
-                response, self.search_params["parser_key"]
-            )
-            return batch_generator
-        except HTTPError as http_err:
-            logger.error(f"HTTP error occurred: {http_err}")
-            raise
-        except Exception as err:
-            logger.error(f"An unexpected error occurred during extraction: {err}")
-            raise
-
-    def _initialize_progress_bar(self) -> tqdm:
-        return tqdm(
-            total=self.search_params["response_header"]["record_count"],
-            desc=f"Receiving data for {self.search_params['customer_name']} {self.search_params['event_processor']} {self.search_params['query']['query_name']} {self.search_params['response_header']['cursor_id']}",
+    def fetch_data(cursor_id: str, max_record_count: int) -> requests.Response:
+        current_record_count = 0
+        response = requests.get(
+            url=f"https://192.168.168.11/api/ariel/searches/{cursor_id}/results",
+            headers={
+                "Range": f"items={current_record_count}-{max_record_count}",
+            },
+            stream=True,
+            verify=False,
         )
+        response.raise_for_status()
+        return response
+
+    def parse_qradar_data(
+        response: requests.Response, parser_key: str
+    ) -> Generator[Dict[str, Any], None, None]:
+        try:
+            for event in ijson.items(response.raw, parser_key):
+                transformed_event = rename_event(event)
+                transformed_event = add_date(transformed_event)
+                yield transformed_event
+        except ValueError:
+            raise
+        except ijson.common.IncompleteJSONError:
+            raise
 
     def _extract_batches(
-        self, response: requests.Response, parser_key: str
+        self,
     ) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
         batch = []
         current_record_count = 0
-        for event in _parse_qradar_data(
-            response, parser_key
+        self.progress_bar = self._initialize_progress_bar()
+        for event in parse_qradar_data(
+            self.response, self.search_params["parser_key"]
         ):  # Use the method within the class
             current_record_count += 1
             self.progress_bar.update()
@@ -107,8 +110,7 @@ class ETLPipeline:
 
     def run(self) -> None:
         try:
-            batch_generator = self.extract()
-
+            batch_generator = self._extract_batches()
             # Create the table before processing batches
             first_batch, _ = next(batch_generator)
             rows, summing_fields, fields = self.transform(first_batch)
@@ -126,41 +128,28 @@ class ETLPipeline:
                 self.load(rows)
             stop = time.perf_counter()
 
-            self.search_params["batch_size"] = settings.clickhouse_batch_size
-            self.search_params["data_ingestion_time"] = (stop - start) / 60 / 60
+            if self.progress_bar:
+                self.progress_bar.close()
+
+            self.search_params["data_ingestion_time"] = round(
+                ((stop - start) / 3600), 2
+            )
             qradar_log = self.search_params.pop("response_header")
             logger.info(
                 "Search Results Ingested",
                 extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
             )
 
-            if self.progress_bar:
-                self.progress_bar.close()
-
         except Exception as general_err:
             logger.error(f"ETL failed: {general_err}")
             raise
 
 
-def _parse_qradar_data(
-    response: requests.Response, parser_key: str
-) -> Generator[Dict[str, Any], None, None]:
-    try:
-        for event in ijson.items(response.raw, parser_key):
-            transformed_event = helpers.rename_event(event)
-            transformed_event = helpers.add_date(transformed_event)
-            yield transformed_event
-    except ValueError as ve:
-        logger.exception(f"Error parsing QRadar data: {ve}")
-    except ijson.common.IncompleteJSONError as ij:
-        logger.error(f"Error parsing QRadar data: {ij}")
-
-
 def etl(
-    session: requests.Session, search_params: Dict[str, Any], base_url: str
+    response: requests.Response, search_params: Dict[str, Any], base_url: str
 ) -> None:
     try:
-        pipeline = ETLPipeline(session, search_params, base_url)
+        pipeline = ETLPipeline(response, search_params, base_url)
         pipeline.run()
     except Exception as err:
         print(err)

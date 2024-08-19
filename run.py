@@ -28,9 +28,9 @@ class QRadarProcessor:
         session = Session()
         base_url = construct_base_urls()
         return QRadarConnector(
-            sec_token=settings.console_3_token,
+            sec_token=settings.console_1_token,
             session=session,
-            base_url=base_url["console_3"],
+            base_url=base_url["console_1"],
         )
 
     def execute_queries(self):
@@ -52,10 +52,11 @@ class QRadarProcessor:
             for future in as_completed(future_to_query):
                 try:
                     result = future.result()
-                    if result["response_header"]["record_count"] == 0:
-                        logger.info("Search Result Empty", extra=result)
-                        continue
-                    results.append(result)
+                    if result:
+                        if result["response_header"]["record_count"] == 0:
+                            logger.info("Search Result Empty", extra=result)
+                            continue
+                        results.append(result)
                 except Exception as e:
                     logger.error(f"Error processing query: {e}", exc_info=True)
         return results
@@ -68,8 +69,12 @@ class QRadarProcessor:
                 for result in results:
                     if result:  # Ensure the result is not None or invalid
                         try:
+                            response = self.qradar_connector.fetch_data(
+                                result["response_header"]["cursor_id"],
+                                result["response_header"]["record_count"],
+                            )
                             etl(
-                                session=self.qradar_connector.session,
+                                response=response,
                                 search_params=result,
                                 base_url=self.qradar_connector.base_url,
                             )
@@ -77,20 +82,23 @@ class QRadarProcessor:
                             logger.error(
                                 f"Data type mismatch error for {customer_name}: {e}"
                             )
+                            raise
                         except Exception as e:
                             logger.error(
                                 f"ETL process failed for {customer_name}: {e}",
                                 exc_info=True,
                             )
                             raise
-            logger.info(f"Process for {customer_name} completed successfully.")
         except Exception as e:
             logger.error(
                 f"Error during processing for {customer_name}: {e}", exc_info=True
             )
             return False
         finally:
-            logger.info(f"Process for {customer_name} finished.")
+            logger.info(
+                f"Process Completed",
+                extra={"ApplicationLog": {"customer_name": customer_name}},
+            )
 
 
 def handle_customer(event_processor, customer_name, queries):
@@ -103,6 +111,8 @@ def graceful_exit(signum, frame):
     sys.exit(0)
 
 
+# TODO: Implement better force shutdown, and interrupt handling.
+# TODO: Implement parallel execution of the `etl` function.
 def main():
     logger.debug("Application Started")
     attributes = load_attributes()
@@ -131,11 +141,11 @@ def main():
                     logger.error(f"Error in processing: {e}", exc_info=True)
 
     except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt received. Terminating processes...")
+        logger.critical("User Interrupt")
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
     finally:
-        logger.debug("All processes finished. Exiting program.")
+        logger.debug("Exiting program")
 
 
 if __name__ == "__main__":

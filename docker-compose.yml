@@ -25,4 +25,4 @@ services:
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/configs/kafka_server_jaas.conf"
     volumes:
-      - ./mykafka:/etc/kafka/configs
+      - ./kafka:/etc/kafka/configs
