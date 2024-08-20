@@ -166,7 +166,7 @@ def transform_raw(
     ] + [
         f'toStartOfHour("{key}")' if key == "Start Time" else f'"{key}"'
         for key in field_names
-        if key not in custom_order and key != "Event Count"
+        if key not in custom_order and key not in ["Event Count", "Score"]
     ]
 
     return rows, summing_fields, fields

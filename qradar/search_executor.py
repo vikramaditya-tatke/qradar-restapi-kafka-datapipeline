@@ -95,7 +95,11 @@ def search_executor(
             extra={"ApplicationLog": search_params, "QRadarLog": search_response},
         )
         return None
-
+    except KeyError as ke:
+        logger.warning(
+            f"Search Failed - Incorrect AQL query format - {ke}",
+            extra={"ApplicationLog": search_params, "QRadarLog": search_response},
+        )
     except requests.exceptions.HTTPError as req_err:
         search_response["QRadar Error Code"] = (
             req_err.response.json().get("http_response").get("code")

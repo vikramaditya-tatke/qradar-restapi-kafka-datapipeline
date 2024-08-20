@@ -55,14 +55,19 @@ def get_search_params(event_processor: int, customer_name: str, query: dict):
         "start_time": "2024-07-27 00:00:00",
         "stop_time": "2024-08-03 00:00:00",
     }
-    start_time, new_stop_time, split_query = adjust_stop_time(search_params)
-    search_params["stop_time"] = new_stop_time.strftime("%Y-%m-%d %H:%M:%S")
-    search_params["query"]["query_expression"] = search_params["query"][
-        "query_expression"
-    ].format(
-        customer_name=search_params["customer_name"],
-        start_time=start_time,
-        stop_time=new_stop_time.strftime("%Y-%m-%d %H:%M:%S"),
-        event_processor=search_params["event_processor"],
-    )
-    return search_params, split_query
+    try:
+        start_time, new_stop_time, split_query = adjust_stop_time(search_params)
+        search_params["stop_time"] = new_stop_time.strftime("%Y-%m-%d %H:%M:%S")
+        search_params["query"]["query_expression"] = search_params["query"][
+            "query_expression"
+        ].format(
+            customer_name=search_params["customer_name"],
+            start_time=start_time,
+            stop_time=new_stop_time.strftime("%Y-%m-%d %H:%M:%S"),
+            event_processor=search_params["event_processor"],
+        )
+        return search_params, split_query
+    except KeyError:
+        raise
+    except Exception:
+        raise
