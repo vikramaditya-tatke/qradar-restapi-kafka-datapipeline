@@ -1,183 +1,152 @@
+import concurrent.futures
+import signal
 import sys
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 
-import loguru
-import ujson
-from pymongo import MongoClient
+import clickhouse_connect.driver.exceptions
+from requests import Session
+
+from attributes import load_attributes
+from etl import etl
+from pipeline_logger import logger
+from qradar.qradarconnector import QRadarConnector
+from qradar.query_builder import construct_base_urls
+from qradar.search_executor import search_executor
+from settings import settings
 
 
-class MongoDBHandler:
-    def __init__(
-        self,
-        mongo_uri="mongodb://Vikram:M0ng0%40DBR%23%23t!@192.168.252.130:23456/?authMechanism=DEFAULT",
-        db_name="DataFetchingLogs",
-        collection_name="logs",
-    ):
-        self.client = MongoClient(mongo_uri)
-        self.db = self.client[db_name]
-        self.collection = self.db[collection_name]
+class QRadarProcessor:
+    def __init__(self, event_processor, customer_names, queries):
+        self.event_processor = event_processor
+        self.customer_names = customer_names
+        self.queries = queries
+        self.qradar_connector = self.setup_qradar_connector()
 
-    def emit(self, record):
+    @staticmethod
+    def setup_qradar_connector():
+        """Initializes the QRadarConnector."""
+        session = Session()
+        base_url = construct_base_urls()
+        return QRadarConnector(
+            sec_token=settings.console_1_token,
+            session=session,
+            base_url=base_url["console_1"],
+        )
+
+    def execute_queries(self):
+        """Executes the search queries and returns the results."""
+        search_params = [
+            (self.event_processor, customer_name, query, self.qradar_connector)
+            for customer_name in self.customer_names
+            for query in self.queries.items()
+        ]
+
+        results = []
+        with ThreadPoolExecutor(
+            max_workers=settings.max_queries_per_event_processor
+        ) as executor:
+            future_to_query = {
+                executor.submit(search_executor, param): param
+                for param in search_params
+            }
+            for future in as_completed(future_to_query):
+                try:
+                    result = future.result()
+                    if result:
+                        if result["response_header"]["record_count"] == 0:
+                            logger.info("Search Result Empty", extra=result)
+                            continue
+                        results.append(result)
+                except Exception as e:
+                    logger.error(f"Error processing query: {e}", exc_info=True)
+        return results
+
+    def process_customer(self, customer_name):
+        """Processes a single customer's events."""
         try:
-            # Check if record is already serialized, if yes, then load it
-            if isinstance(record, str):
-                record = ujson.loads(record)
-
-            # Ensure the record is a dictionary
-            if not isinstance(record, dict):
-                raise ValueError("Log record must be a dictionary")
-
-            # Access the serialized data safely
-            log_record = record.get("extra", {}).get("serialized_dict", record)
-            self.collection.insert_one(log_record)
+            results = self.execute_queries()
+            if len(results) > 0:
+                for result in results:
+                    if result:  # Ensure the result is not None or invalid
+                        try:
+                            response = self.qradar_connector.fetch_data(
+                                result["response_header"]["cursor_id"],
+                                result["response_header"]["record_count"],
+                            )
+                            etl(
+                                response=response,
+                                search_params=result,
+                                base_url=self.qradar_connector.base_url,
+                            )
+                        except clickhouse_connect.driver.exceptions.DataError as e:
+                            logger.error(
+                                f"Data type mismatch error for {customer_name}: {e}"
+                            )
+                            raise
+                        except Exception as e:
+                            logger.error(
+                                f"ETL process failed for {customer_name}: {e}",
+                                exc_info=True,
+                            )
+                            raise
         except Exception as e:
-            logger.error(f"Failed to write log to MongoDB: {e}. Record: {record}")
+            logger.error(
+                f"Error during processing for {customer_name}: {e}", exc_info=True
+            )
+            return False
+        finally:
+            logger.info(
+                f"Process Completed",
+                extra={"ApplicationLog": {"customer_name": customer_name}},
+            )
 
 
-# TODO: Fix serialization errors when exec_info is set to True
-def serialize(record) -> dict:
-    """Serializes the log records and merges ApplicationLog and QRadarLog into a single dictionary."""
-    flattened_extra = record["extra"].get("extra", {})
-    application_log = flattened_extra.get("ApplicationLog", {})
-    qradar_log = flattened_extra.get("QRadarLog", {})
-
-    if not isinstance(application_log, dict):
-        application_log = {}
-    if not isinstance(qradar_log, dict):
-        qradar_log = {}
-
-    merged_log = {**application_log, **qradar_log}
-
-    final_log = {
-        "timestamp": str(record["time"]),
-        "message": record["message"],
-        "level": record["level"].name,
-        **merged_log,
-    }
-
-    additional_fields = {
-        "data_ingestion_time": flattened_extra.get("data_ingestion_time"),
-        "batch_size": flattened_extra.get("batch_size"),
-    }
-
-    if "query" in final_log and isinstance(final_log["query"], dict):
-        final_log["query_name"] = final_log["query"].get("query_name")
-
-    final_log.update({k: v for k, v in additional_fields.items() if v is not None})
-
-    return final_log
+def handle_customer(event_processor, customer_name, queries):
+    processor = QRadarProcessor(event_processor, [customer_name], queries)
+    processor.process_customer(customer_name)
 
 
-def patching(record):
+def graceful_exit(signum, frame):
+    logger.info("Received termination signal. Exiting gracefully...")
+    sys.exit(0)
+
+
+# TODO: Implement better force shutdown, and interrupt handling.
+# TODO: Implement parallel execution of the `etl` function.
+def main():
+    logger.debug("Application Started")
+    attributes = load_attributes()
+    ep_client_list = attributes.get("ep_client_list")
+    queries = attributes["queries"]
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, graceful_exit)
+    signal.signal(signal.SIGTERM, graceful_exit)
+
     try:
-        serialized_dict = serialize(record)
-        # Ensure the 'extra' field exists
-        record.setdefault("extra", {})
-        record["extra"]["serialized_dict"] = serialized_dict
-        record["extra"]["serialized"] = ujson.dumps(serialized_dict)
+        with ProcessPoolExecutor(
+            max_workers=settings.max_event_processors_engaged
+        ) as executor:
+            futures = {
+                executor.submit(
+                    handle_customer, ep, customer_name, queries
+                ): customer_name
+                for ep, customer_names in ep_client_list.items()
+                for customer_name in customer_names
+            }
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Error in processing: {e}", exc_info=True)
+
+    except KeyboardInterrupt:
+        logger.critical("User Interrupt")
     except Exception as e:
-        logger.error(f"Failed to serialize record: {e}. Record: {record}")
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+    finally:
+        logger.debug("Exiting program")
 
 
-def truncate(value, max_length):
-    return (
-        str(value)[:max_length]
-        if len(str(value)) > max_length
-        else str(value).ljust(max_length)
-    )
-
-
-def custom_format(record):
-    # Parse the serialized extra data
-    extra_data = ujson.loads(record["extra"].get("serialized", "{}"))
-
-    # Extract and truncate the fields
-    event_processor = truncate(extra_data.get("event_processor", "N/A"), 4)
-    customer_name = truncate(extra_data.get("customer_name", "N/A"), 25)
-    query_name = truncate(extra_data.get("query_name", "N/A"), 25)
-    start_time = truncate(extra_data.get("start_time", "N/A"), 20)
-    stop_time = truncate(extra_data.get("stop_time", "N/A"), 20)
-    progress = truncate(extra_data.get("progress", "N/A"), 5)
-    record_count = truncate(extra_data.get("record_count", "N/A"), 10)
-    data_ingestion_time = truncate(extra_data.get("data_ingestion_time", "N/A"), 3)
-    message = truncate(record["message"], 30)
-
-    # Format the log message
-    return (
-        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-        "<level>{level: <5}</level> | "
-        f"<yellow>{event_processor: <3}</yellow> | "
-        f"<blue>{customer_name: <25}</blue> | "
-        f"<cyan>{query_name: <25}</cyan> | "
-        f"<magenta>{start_time: <20}</magenta> | "
-        f"<magenta>{stop_time: <20}</magenta> | "
-        f"<red>{progress: <5}</red> | "
-        f"<green>{record_count: <5}</green> | "
-        f"<yellow>{data_ingestion_time: <3}</yellow> | "
-        "<level>{message: <30}</level> |\n"
-    )
-
-
-def modify_logger():
-    logger = loguru.logger.patch(patching)
-    logger.remove(0)  # Remove the default handler
-
-    # Ensure log directory exists
-    log_dir = Path("./logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    # Add handler for app.log
-    logger.add(
-        log_dir / "app.log",
-        format="{extra[serialized]}",
-        rotation="500 MB",
-        retention="7 days",
-        compression="zip",
-        enqueue=True,
-        catch=True,
-        backtrace=True,
-        diagnose=True,
-        serialize=True,
-        colorize=False,
-        encoding="utf-8",
-        mode="a",
-    )
-
-    # Add handler for error.log
-    logger.add(
-        log_dir / "error.log",
-        level="ERROR",
-        format="{extra[serialized]}",
-        rotation="1 day",
-        retention="7 days",
-        compression="zip",
-        enqueue=True,
-        catch=True,
-        backtrace=True,
-        diagnose=True,
-        serialize=True,
-        colorize=False,
-        encoding="utf-8",
-        mode="a",
-    )
-
-    # Add stdout handler for debugging
-    logger.add(
-        sys.stdout,
-        level="DEBUG",
-        format=custom_format,
-        enqueue=True,
-        colorize=True,
-        backtrace=True,
-        diagnose=True,
-    )
-
-    # Add MongoDB handler
-    mongo_handler = (
-        MongoDBHandler()
-    )  # You can customize the URI, db_name, and collection_name here
-    logger.add(mongo_handler.emit, format="{extra[serialized]}", enqueue=True)
-    return logger
-
-
-logger = modify_logger()
+if __name__ == "__main__":
+    main()

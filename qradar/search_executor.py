@@ -1,7 +1,8 @@
 import requests.exceptions
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import stop_after_attempt, wait_exponential, retry
 
 from pipeline_logger import logger
+from qradar.qradarconnector import QRadarConnector
 from qradar.query_builder import get_search_params
 from settings import settings
 
@@ -14,19 +15,25 @@ from settings import settings
     ),
     reraise=True,  # Re-raise the final exception
 )
-def search_executor(search_params):
+def search_executor(
+    event_processor: int,
+    customer_name: str,
+    query: dict,
+    qradar_connector: QRadarConnector,
+):
     """
     Performs a QRadar search with retry mechanism and detailed logging.
     Creates a process for each console.
     """
-    event_processor, customer_name, query, qradar_connector = search_params
     search_response = {}
+    # Generate the search parameters and split the query according to fixed time intervals if query is of large or
+    # medium type.
+    search_params, split_query = get_search_params(
+        event_processor,
+        customer_name,
+        query,
+    )
     try:
-        # Generate the search parameters and split the query according to fixed time intervals if query is of large or
-        # medium type.
-        search_params, split_query = get_search_params(
-            (event_processor, customer_name, query, qradar_connector)
-        )
         logger.debug(
             "Generated search parameters",
             extra={

@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from clickhouse import clickhouse, helpers
 from clickhouse.clickhouse import process_batch_async
+
 # Set up a basic logger
 from pipeline_logger import logger
 from qradar.qradarconnector import parse_qradar_data
@@ -45,32 +46,6 @@ class ETLPipeline:
             .replace("_", "")
         )
 
-    def fetch_data(cursor_id: str, max_record_count: int) -> requests.Response:
-        current_record_count = 0
-        response = requests.get(
-            url=f"https://192.168.168.11/api/ariel/searches/{cursor_id}/results",
-            headers={
-                "Range": f"items={current_record_count}-{max_record_count}",
-            },
-            stream=True,
-            verify=False,
-        )
-        response.raise_for_status()
-        return response
-
-    def parse_qradar_data(
-        response: requests.Response, parser_key: str
-    ) -> Generator[Dict[str, Any], None, None]:
-        try:
-            for event in ijson.items(response.raw, parser_key):
-                transformed_event = rename_event(event)
-                transformed_event = add_date(transformed_event)
-                yield transformed_event
-        except ValueError:
-            raise
-        except ijson.common.IncompleteJSONError:
-            raise
-
     def _extract_batches(
         self,
     ) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
@@ -98,9 +73,9 @@ class ETLPipeline:
     def load(self, rows: Any) -> None:
         try:
             asyncio.run(process_batch_async(rows, self.click_house_table_name))
-        except clickhouse_connect.driver.exceptions.DataError as data_err:
-            logger.error(f"Data type mismatch error in ClickHouse: {data_err}")
-            raise
+        # except clickhouse_connect.driver.exceptions.DataError as data_err:
+        #     logger.error(f"Data type mismatch error in ClickHouse: {data_err}")
+        #     raise
         except clickhouse_connect.driver.exceptions.DatabaseError as db_err:
             logger.error(f"Database error in ClickHouse: {db_err}")
             raise
@@ -109,6 +84,7 @@ class ETLPipeline:
             raise
 
     def run(self) -> None:
+        qradar_log = {} # Empty dictionary for logging.
         try:
             batch_generator = self._extract_batches()
             # Create the table before processing batches
@@ -139,9 +115,12 @@ class ETLPipeline:
                 "Search Results Ingested",
                 extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
             )
+        except KeyError as ke:
+            logger.error(f"ETL failed: Missing Field - {ke}", extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log})
+            raise
 
         except Exception as general_err:
-            logger.error(f"ETL failed: {general_err}")
+            logger.error(f"ETL failed: Unknown Error - {general_err}", extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log})
             raise
 
 

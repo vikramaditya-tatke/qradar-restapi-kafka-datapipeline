@@ -96,10 +96,9 @@ def load_rows_using_summing_merge_tree(click_house_table_name, client: Client, r
 async def load_rows_async_using_summing_merge_tree(click_house_table_name, rows):
     try:
         client = await create_async_clickhouse_client()
-        await client.insert(click_house_table_name, rows)
+        result = await client.insert(click_house_table_name, rows)
         client.close()
     except Exception as e:
-        print(e)
         raise
 
 

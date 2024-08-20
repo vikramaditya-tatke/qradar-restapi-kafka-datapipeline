@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta
 
 from pipeline_logger import logger
-from settings import settings
+from settings import Settings
 
 
-def construct_base_urls() -> dict:
+def construct_base_urls(settings: Settings) -> dict:
     """Constructs a dictionary of base URLs for QRadar consoles."""
     return {"console_1": f"https://{settings.console_1_ip}"}
 
@@ -42,17 +42,18 @@ def adjust_stop_time(search_params):
         return search_params["start_time"], stop_time, split_query
 
 
-def get_search_params(search_params):
+# TODO: Unpack the query dictionary into query_name and query_expression.
+def get_search_params(event_processor: int, customer_name: str, query: dict):
     """ """
     search_params = {
-        "event_processor": search_params[0],
-        "customer_name": search_params[1],
+        "event_processor": event_processor,
+        "customer_name": customer_name,
         "query": {
-            "query_name": search_params[2][0],
-            "query_expression": search_params[2][1],
+            "query_name": query["query_name"],
+            "query_expression": query["query_expression"],
         },
-        "start_time": "2024-07-20 00:00:00",
-        "stop_time": "2024-07-27 00:00:00",
+        "start_time": "2024-07-27 00:00:00",
+        "stop_time": "2024-08-03 00:00:00",
     }
     start_time, new_stop_time, split_query = adjust_stop_time(search_params)
     search_params["stop_time"] = new_stop_time.strftime("%Y-%m-%d %H:%M:%S")

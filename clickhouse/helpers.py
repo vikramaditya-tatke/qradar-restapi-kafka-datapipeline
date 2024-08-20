@@ -67,28 +67,30 @@ def add_date(line_json):
     Returns:
         The modified JSON object.
     """
+    try:
+        query_date_epoch = line_json.get("Start Time") or line_json.get("Time")
 
-    query_date_epoch = line_json.get("Start Time") or line_json.get("Time")
+        if query_date_epoch is None:
+            raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
 
-    if query_date_epoch is None:
-        raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
+        # Determine timestamp type (milliseconds or seconds) and adjust if needed
+        if query_date_epoch > 1e10:
+            query_timestamp = query_date_epoch / 1000
+        else:
+            query_timestamp = query_date_epoch
+            line_json["Start Time"] = (
+                query_date_epoch * 1000
+            )  # Converting epoch to epoch milliseconds.
 
-    # Determine timestamp type (milliseconds or seconds) and adjust if needed
-    if query_date_epoch > 1e10:
-        query_timestamp = query_date_epoch / 1000
-    else:
-        query_timestamp = query_date_epoch
-        line_json["Start Time"] = (
-            query_date_epoch * 1000
-        )  # Converting epoch to epoch milliseconds.
+        base_date = datetime.fromtimestamp(query_timestamp)
+        previous_saturday = base_date + relativedelta(weekday=SA(-1))
+        line_json["WeekFrom"] = previous_saturday.date()
+        line_json["Event Count"] = int(line_json["Event Count"])
+        line_json["ReportDate"] = base_date.date()
 
-    base_date = datetime.fromtimestamp(query_timestamp)
-    previous_saturday = base_date + relativedelta(weekday=SA(-1))
-    line_json["WeekFrom"] = previous_saturday.date()
-    line_json["Event Count"] = int(line_json["Event Count"])
-    line_json["ReportDate"] = base_date.date()
-
-    return line_json
+        return line_json
+    except KeyError:
+        raise
 
 
 def get_clickhouse_type_for_dict(value):
@@ -125,6 +127,7 @@ def get_clickhouse_type_for_dict(value):
         "Account Security ID",
         "Rule Name",
         "URL Domain",
+        "Action",
     ]:
         return "Nullable(String)"
     else:
