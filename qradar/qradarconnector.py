@@ -7,7 +7,6 @@ from requests.exceptions import HTTPError, ReadTimeout
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 
-from clickhouse.helpers import rename_event, add_date
 from settings import settings
 
 # Disable warnings about insecure HTTPS requests (if using self-signed certs, for example)
@@ -89,7 +88,7 @@ class QRadarConnector:
         response = self._make_request("GET", url, headers=headers)
         return response.json()
 
-    def _extract_parser_key(self, url: str) -> str:
+    def _extract_parser_key(self, url: str) -> str | None:
         """Finds the dynamic key required for parsing JSON data.
 
         Args:
@@ -107,7 +106,7 @@ class QRadarConnector:
                     break
         return parser_key
 
-    def get_parser_key(self, response_header: dict) -> dict:
+    def get_parser_key(self, response_header: dict) -> dict | None:
         """Initiates a GET request to stream the entire search result at once.
 
         Args:
@@ -139,9 +138,7 @@ def parse_qradar_data(
 ) -> Generator[Dict[str, Any], None, None]:
     try:
         for event in ijson.items(response.raw, parser_key):
-            transformed_event = rename_event(event)
-            transformed_event = add_date(transformed_event)
-            yield transformed_event
+            yield event
     except ValueError:
         raise
     except ijson.common.IncompleteJSONError:

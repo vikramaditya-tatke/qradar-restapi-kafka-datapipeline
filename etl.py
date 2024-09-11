@@ -73,9 +73,9 @@ class ETLPipeline:
     def load(self, rows: Any) -> None:
         try:
             asyncio.run(process_batch_async(rows, self.click_house_table_name))
-        # except clickhouse_connect.driver.exceptions.DataError as data_err:
-        #     logger.error(f"Data type mismatch error in ClickHouse: {data_err}")
-        #     raise
+        except clickhouse_connect.driver.exceptions.DataError as data_err:
+            logger.error(f"Data type mismatch error in ClickHouse: {data_err}")
+            raise
         except clickhouse_connect.driver.exceptions.DatabaseError as db_err:
             logger.error(f"Database error in ClickHouse: {db_err}")
             raise
@@ -84,7 +84,7 @@ class ETLPipeline:
             raise
 
     def run(self) -> None:
-        qradar_log = {} # Empty dictionary for logging.
+        qradar_log = {}  # Empty dictionary for logging.
         try:
             batch_generator = self._extract_batches()
             # Create the table before processing batches
@@ -116,11 +116,17 @@ class ETLPipeline:
                 extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
             )
         except KeyError as ke:
-            logger.error(f"ETL failed: Missing Field - {ke}", extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log})
+            logger.error(
+                f"ETL failed: Missing Field - {ke}",
+                extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
+            )
             raise
 
         except Exception as general_err:
-            logger.error(f"ETL failed: Unknown Error - {general_err}", extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log})
+            logger.error(
+                f"ETL failed: Unknown Error - {general_err}",
+                extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
+            )
             raise
 
 

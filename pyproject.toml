@@ -29,6 +29,8 @@ prettier = "^0.0.7"
 clickhouse-connect = "^0.7.16"
 sentry-sdk = { extras = ["clickhouse-driver"], version = "^2.11.0" }
 clickhouse-driver = "^0.2.8"
+python-dateutil = "^2.9.0.post0"
+pyyaml = "^6.0.2"
 
 
 [build-system]

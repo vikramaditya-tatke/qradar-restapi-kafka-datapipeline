@@ -4,6 +4,47 @@ from typing import List, Dict, Any
 from dateutil.relativedelta import SA, relativedelta
 
 
+def get_clickhouse_type_for_dict(value):
+    if value in ["Source IP", "Destination IP"]:
+        return "IPv4"
+    elif value in ["Event Count", "Bytes Sent", "Bytes Received", "QID"]:
+        return "UInt64"
+    elif value in ["Source Port", "Destination Port", "Domain"]:
+        return "UInt16"
+    elif value in ["Domain", "Magnitude"]:
+        return "UInt8"
+    if value in ["Start Time"]:
+        return "DateTime64(3)"
+    elif value in ["ReportDate", "WeekFrom"]:
+        return "Date"
+    elif value in [
+        "Username",
+        "Error Code",
+        "Threat Name",
+        "Source Hostname",
+        "Event ID",
+        "Logon Type",
+        "Source Workstation",
+        "Process Name",
+        "Policy Name",
+        "Category Description",
+        "URL domain",
+        "bad_key",
+        "Sender",
+        "Recipient",
+        "Command",
+        "Affected Workload",
+        "Application Name",
+        "Account Security ID",
+        "Rule Name",
+        "URL Domain",
+        "Action",
+    ]:
+        return "Nullable(String)"
+    else:
+        return "LowCardinality(String)"
+
+
 def rename_event(event):
     """Cleans and renames event keys efficiently."""
     mapping = {
@@ -91,47 +132,6 @@ def add_date(line_json):
         return line_json
     except KeyError:
         raise
-
-
-def get_clickhouse_type_for_dict(value):
-    if value in ["Source IP", "Destination IP"]:
-        return "IPv4"
-    elif value in ["Event Count", "Bytes Sent", "Bytes Received", "QID"]:
-        return "UInt64"
-    elif value in ["Source Port", "Destination Port", "Domain"]:
-        return "UInt16"
-    elif value in ["Domain", "Magnitude"]:
-        return "UInt8"
-    if value in ["Start Time"]:
-        return "DateTime64(3)"
-    elif value in ["ReportDate", "WeekFrom"]:
-        return "Date"
-    elif value in [
-        "Username",
-        "Error Code",
-        "Threat Name",
-        "Source Hostname",
-        "Event ID",
-        "Logon Type",
-        "Source Workstation",
-        "Process Name",
-        "Policy Name",
-        "Category Description",
-        "URL domain",
-        "bad_key",
-        "Sender",
-        "Recipient",
-        "Command",
-        "Affected Workload",
-        "Application Name",
-        "Account Security ID",
-        "Rule Name",
-        "URL Domain",
-        "Action",
-    ]:
-        return "Nullable(String)"
-    else:
-        return "LowCardinality(String)"
 
 
 def transform_raw(
