@@ -62,16 +62,16 @@ def extract_sort_key(df: pl.DataFrame, mapping_data: Dict[str, Any], query_name:
     custom_order_mapping = mapping_data.get("custom_order", {})
     custom_order = custom_order_mapping.get(query_name, df.columns)
 
-    # Create summing fields (excluding specific columns like "Event Count", "Score")
+    # Create sort key (excluding specific columns like "Event Count", "Score")
     sort_key = [
-                         f'toStartOfHour("{col}")' if col == "Start Time" else f'"{col}"'
-                         for col in custom_order
-                         if col in df.columns and col not in ["Event Count", "Score"]
-                     ] + [
-                         f'"{col}"'
-                         for col in df.columns
-                         if col not in custom_order and col not in ["Event Count", "Score"]
-                     ]
+        f'toStartOfHour("{col}")' if col == "Start Time" else f'"{col}"'
+        for col in custom_order
+        if col in df.columns and col not in ["Event Count", "Score"]
+        ] + [
+        f'"{col}"'
+        for col in df.columns
+        if col not in custom_order and col not in ["Event Count", "Score"]
+    ]
 
     return sort_key
 

@@ -22,6 +22,7 @@ class ETLPipeline:
         self.response = response
         self.search_params = search_params
         self.search_params["batch_size"] = settings.clickhouse_batch_size
+        self.qradar_log = self.search_params.pop("response_header")
         self.base_url = base_url
         self.customer_name = self._sanitize_customer_name(
             search_params["customer_name"]
@@ -46,7 +47,7 @@ class ETLPipeline:
             .replace("_", "")
         )
 
-    def _extract_batches(
+    def extract_batches(
         self,
     ) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
         batch = []
@@ -83,20 +84,38 @@ class ETLPipeline:
             logger.error(f"An unexpected error occurred during loading: {load_err}")
             raise
 
-    def run(self) -> None:
-        qradar_log = {}  # Empty dictionary for logging.
+    def run_first(self, batch_generator: Generator[Tuple[List[Dict[str, Any]], int], None, None]) -> None:
+        """Runs the ETL pipeline by processing the first batch."""
         try:
-            batch_generator = self._extract_batches()
             # Create the table before processing batches
             first_batch, _ = next(batch_generator)
             rows, summing_fields, fields = self.transform(first_batch)
             clickhouse.create_summing_merge_tree_table(
                 self.click_house_table_name, fields, summing_fields
             )
-
             # Process the first batch
             self.load(rows)
+            logger.info(
+                "Initial Batch Ingested",
+                extra={"ApplicationLog": self.search_params, "QRadarLog": self.qradar_log},
+            )
+        except KeyError as ke:
+            logger.error(
+                f"ETL failed: Missing Field - {ke}",
+                extra={"ApplicationLog": self.search_params, "QRadarLog": self.qradar_log},
+            )
+            raise
 
+        except Exception as general_err:
+            logger.error(
+                f"ETL failed: Unknown Error - {general_err}",
+                extra={"ApplicationLog": self.search_params, "QRadarLog": self.qradar_log},
+            )
+            raise
+
+    def run(self, batch_generator: Generator[Tuple[List[Dict[str, Any]], int], None, None]) -> None:
+        """Runs the ETL pipeline by processing subsequent batches."""
+        try:
             # Process subsequent batches
             start = time.perf_counter()
             for batch, current_record_count in batch_generator:
@@ -110,22 +129,21 @@ class ETLPipeline:
             self.search_params["data_ingestion_time"] = round(
                 ((stop - start) / 3600), 2
             )
-            qradar_log = self.search_params.pop("response_header")
             logger.info(
                 "Search Results Ingested",
-                extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
+                extra={"ApplicationLog": self.search_params, "QRadarLog":self.qradar_log},
             )
         except KeyError as ke:
             logger.error(
                 f"ETL failed: Missing Field - {ke}",
-                extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
+                extra={"ApplicationLog": self.search_params, "QRadarLog": self.qradar_log},
             )
             raise
 
         except Exception as general_err:
             logger.error(
                 f"ETL failed: Unknown Error - {general_err}",
-                extra={"ApplicationLog": self.search_params, "QRadarLog": qradar_log},
+                extra={"ApplicationLog": self.search_params, "QRadarLog": self.qradar_log},
             )
             raise
 
@@ -135,7 +153,9 @@ def etl(
 ) -> None:
     try:
         pipeline = ETLPipeline(response, search_params, base_url)
-        pipeline.run()
+        batch_generator = pipeline.extract_batches()
+        pipeline.run_first(batch_generator)
+        pipeline.run(batch_generator)
     except Exception as err:
         print(err)
 
