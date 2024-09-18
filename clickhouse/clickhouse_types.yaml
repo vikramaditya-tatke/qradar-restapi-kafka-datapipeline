@@ -11,7 +11,7 @@ clickhouse_type_mapping:
   Start Time: "DateTime64(3)"
   ReportDate: "Date"
   WeekFrom: "Date"
-nullable_fields:
+nullable_columns:
   - Username
   - Error Code
   - Threat Name

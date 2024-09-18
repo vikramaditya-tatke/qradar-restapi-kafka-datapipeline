@@ -27,26 +27,18 @@ def get_clickhouse_type_for_dict(value: str, type_mapping_file: str) -> str:
     """Returns the ClickHouse data type for specific columns, reading from a YAML/JSON mapping."""
     mapping_data = load_mapping(type_mapping_file)
     clickhouse_type_mapping = mapping_data.get("clickhouse_type_mapping", {})
-    nullable_fields = set(mapping_data.get("nullable_fields", []))
+    nullable_columns = set(mapping_data.get("nullable_columns", []))
 
     # Check if the field is in nullable fields
-    if value in nullable_fields:
+    if value in nullable_columns:
         return "Nullable(String)"
 
     # Return the mapped type or default to LowCardinality(String)
     return clickhouse_type_mapping.get(value, "LowCardinality(String)")
 
 
-def transform(
-        batch: List[Dict[str, Any]], query_name: str, mapping_file: str, type_mapping_file: str
-) -> Tuple[List[List[Any]], List[str], List[str]]:
-    """Transforms the input batch of data into the correct format for ClickHouse insertion."""
-    # Load YAML mappings
-    mapping_data = load_mapping(mapping_file)
-    field_mapping = mapping_data.get("field_mapping", {})
-    custom_order_mapping = mapping_data.get("custom_order", {})
-
-    # Convert input data to Polars DataFrame and rename columns
+def create_mapped_dataframe(batch: List[Dict[str, Any]], field_mapping: [Dict[str, Any]]) -> pl.DataFrame:
+    """Creates a Polars DataFrame from the input batch and applies field mappings."""
     df = pl.DataFrame(batch)
     renamed_cols = {col: field_mapping.get(col, col) for col in df.columns}
     df = df.rename(renamed_cols)
@@ -62,26 +54,43 @@ def transform(
             pl.lit(datetime.utcnow()).alias("createdAt"),
         ]
     )
+    return df
 
+
+def extract_sort_key(df: pl.DataFrame, mapping_data: Dict[str, Any], query_name: str) -> List[str]:
     # Generate custom order or default to all columns
+    custom_order_mapping = mapping_data.get("custom_order", {})
     custom_order = custom_order_mapping.get(query_name, df.columns)
 
     # Create summing fields (excluding specific columns like "Event Count", "Score")
-    summing_fields = [
-        f'toStartOfHour("{col}")' if col == "Start Time" else f'"{col}"'
-        for col in custom_order
-        if col in df.columns and col not in ["Event Count", "Score"]
-        ] + [
-        f'"{col}"'
-        for col in df.columns
-        if col not in custom_order and col not in ["Event Count", "Score"]
-    ]
+    sort_key = [
+                         f'toStartOfHour("{col}")' if col == "Start Time" else f'"{col}"'
+                         for col in custom_order
+                         if col in df.columns and col not in ["Event Count", "Score"]
+                     ] + [
+                         f'"{col}"'
+                         for col in df.columns
+                         if col not in custom_order and col not in ["Event Count", "Score"]
+                     ]
 
+    return sort_key
+
+
+def transform(
+        batch: List[Dict[str, Any]], query_name: str, mapping_file: str, type_mapping_file: str
+) -> Tuple[List[List[Any]], List[str], List[str]]:
+    """Transforms the input batch into a ClickHouse-compatible format and returns the data, sort key, and columns."""
+    # Load YAML mappings
+    mapping_data = load_mapping(mapping_file)
+    field_mapping = mapping_data.get("field_mapping", {})
+
+    mapped_df = create_mapped_dataframe(batch, field_mapping)
+    sort_key = extract_sort_key(mapped_df, mapping_data, query_name)
+    columns = [f'"{col}" {get_clickhouse_type_for_dict(col, type_mapping_file)}' for col in mapped_df.columns]
     # Convert DataFrame to list of rows and ClickHouse field types
-    rows = df.to_numpy().tolist()
-    fields = [f'"{col}" {get_clickhouse_type_for_dict(col, type_mapping_file)}' for col in df.columns]
+    rows = mapped_df.to_numpy().tolist()
 
-    return rows, summing_fields, fields
+    return rows, sort_key, columns
 
 
 def read_yaml_mapping(mapping_file: str) -> Tuple[Dict[str, str], Dict[str, List[str]]]:
