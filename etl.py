@@ -123,16 +123,17 @@ class ETLPipeline:
                 self.load(rows)
             stop = time.perf_counter()
 
-            if self.progress_bar:
-                self.progress_bar.close()
-
             self.search_params["data_ingestion_time"] = round(
                 ((stop - start) / 3600), 2
             )
             logger.info(
                 "Search Results Ingested",
-                extra={"ApplicationLog": self.search_params, "QRadarLog":self.qradar_log},
+                extra={"ApplicationLog": self.search_params, "QRadarLog": self.qradar_log},
             )
+            # Clean up the progress bar
+            if self.progress_bar:
+                self.progress_bar.close()
+
         except KeyError as ke:
             logger.error(
                 f"ETL failed: Missing Field - {ke}",
