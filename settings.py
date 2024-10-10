@@ -1,5 +1,5 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AnyHttpUrl, constr, conint
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -24,9 +24,11 @@ class Settings(BaseSettings):
     console_3_ip: str
     console_3_token: constr(min_length=10)
     console_aa_ip: str
-    console_aa_token: constr(min_length=10)
+    console_aa_token: constr(min_length=0)
+    console_aus_ip: str
+    console_aus_token: constr(min_length=0)
     console_uae_ip: str
-    console_uae_token: constr(min_length=10)
+    console_uae_token: constr(min_length=0)
     console_us_ip: str
     console_us_token: constr(min_length=10)
 
@@ -40,11 +42,13 @@ class Settings(BaseSettings):
     max_search_ttc_in_seconds: conint(ge=1)
     batch_size_limit: conint(ge=1)
     imply_base_url: AnyHttpUrl  # Ensure valid URL
-    clickhouse_base_url: AnyHttpUrl
-    clickhouse_batch_size: conint(ge=1)
+
+    clickhouse_base_url: str
+    clickhouse_batch_size: conint(ge=5000)
     clickhouse_compression_protocol: str
     clickhouse_password: str
     clickhouse_port: conint(ge=1, le=65535)
+    clickhouse_database: str
     clickhouse_user: str
     max_queries_per_event_processor: conint(ge=1)
     max_event_processors_engaged: conint(ge=1)
