@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     Validation is applied to ensure proper data types and values.
     To override settings for testing or development, specify a different `.env` file.
     """
+
     console_1_ip: str
     console_1_token: constr(min_length=10)  # Token must be at least 10 characters
     console_2_ip: str
@@ -44,7 +45,7 @@ class Settings(BaseSettings):
     imply_base_url: AnyHttpUrl  # Ensure valid URL
 
     clickhouse_base_url: str
-    clickhouse_batch_size: conint(ge=5000)
+    clickhouse_batch_size: conint(ge=2)
     clickhouse_compression_protocol: str
     clickhouse_password: str
     clickhouse_port: conint(ge=1, le=65535)

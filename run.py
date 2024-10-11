@@ -270,7 +270,7 @@ async def main():
     settings = Settings()
 
     try:
-        await process_all_customers(settings, args.console)
+        await process_all_customers(settings, "1")
     except Exception as e:
         logger.critical(
             f"Unexpected error during main execution: {e}",

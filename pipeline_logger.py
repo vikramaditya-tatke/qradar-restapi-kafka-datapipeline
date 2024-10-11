@@ -9,7 +9,7 @@ from pymongo import MongoClient
 class MongoDBHandler:
     def __init__(
         self,
-        mongo_uri="mongodb://Vikram:M0ng0%40DBR%23%23t!@192.168.252.130:23456/?authMechanism=DEFAULT",
+        mongo_uri="mongodb://root:M0ng0%40DBR%23%23t!@172.30.170.55:23455/?authMechanism=DEFAULT",
         db_name="DataFetchingLogs",
         collection_name="logs",
     ):
@@ -52,6 +52,8 @@ def serialize(record) -> dict:
         "timestamp": str(record["time"]),
         "message": record["message"],
         "level": record["level"].name,
+        "module": record["module"],
+        "line": record["line"],
         **merged_log,
     }
 
@@ -100,12 +102,16 @@ def custom_format(record):
     progress = truncate(extra_data.get("progress", "N/A"), 5)
     record_count = truncate(extra_data.get("record_count", "N/A"), 10)
     data_ingestion_time = truncate(extra_data.get("data_ingestion_time", "N/A"), 3)
-    message = truncate(record["message"], 30)
+    message = truncate(record["message"], 150)
+    module = truncate(record["module"], 20)
+    line = record["line"]
 
     # Format the log message
     return (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
         "<level>{level: <5}</level> | "
+        f"<level>{line: <3}</level> | "
+        f"<level>{module: <5}</level> | "
         f"<yellow>{event_processor: <3}</yellow> | "
         f"<blue>{customer_name: <25}</blue> | "
         f"<cyan>{query_name: <25}</cyan> | "

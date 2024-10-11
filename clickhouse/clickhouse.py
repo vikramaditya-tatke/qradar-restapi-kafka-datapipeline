@@ -1,6 +1,6 @@
 import clickhouse_connect
-from clickhouse_connect.driver.exceptions import DatabaseError, DataError
 from clickhouse_connect.driver import AsyncClient
+from clickhouse_connect.driver.exceptions import DatabaseError, DataError
 
 from pipeline_logger import logger
 from settings import settings
@@ -27,7 +27,9 @@ async def create_async_clickhouse_client() -> AsyncClient:
         print(f"Failed to connect to ClickHouse: {e}")
 
 
-async def create_summing_merge_tree_table(click_house_table_name, fields, summing_fields):
+async def create_summing_merge_tree_table(
+    click_house_table_name, fields, summing_fields
+):
     client = await create_async_clickhouse_client()
     create_table_query = f"""
             CREATE TABLE IF NOT EXISTS {click_house_table_name} (
@@ -41,33 +43,39 @@ async def create_summing_merge_tree_table(click_house_table_name, fields, summin
         """
     try:
         await client.command(create_table_query)
-        await client.close()
     except DatabaseError as e:
         logger.error("ClickHouse Table Creation Failed")
         raise
     except Exception:
         raise
 
+
 # TODO: Handle the clickhouse_connect.driver.exceptions.DataError
 
 
-async def load_rows_async_using_summing_merge_tree(click_house_table_name, rows):
+async def load_rows_async_using_summing_merge_tree(
+    click_house_table_name, column_names, rows
+):
     try:
         client = await create_async_clickhouse_client()
-        result = await client.insert(click_house_table_name, rows)
-        print(result.written_rows)
+        result = await client.insert(
+            click_house_table_name,
+            data=rows,
+            column_names=column_names,
+        )
         client.close()
     except DatabaseError as e:
         raise
-    except Exception:
+    except Exception as e:
         raise
 
 
-async def process_batch_async(rows, click_house_table_name):
+async def process_batch_async(rows, column_names, click_house_table_name):
     try:
         await load_rows_async_using_summing_merge_tree(
-            click_house_table_name,
-            rows,
+            click_house_table_name=click_house_table_name,
+            rows=rows,
+            column_names=column_names,
         )
     except DataError:
         raise

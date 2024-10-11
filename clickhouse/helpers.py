@@ -1,52 +1,64 @@
-from datetime import datetime
-from typing import List, Dict, Any
+# helpers.py
 
+import logging
+from datetime import datetime, date
+from decimal import Decimal
+from typing import List, Dict, Any, Tuple
+
+import polars as pl
 from dateutil.relativedelta import SA, relativedelta
 
+from settings import settings
 
-def get_clickhouse_type_for_dict(value):
-    if value in ["Source IP", "Destination IP"]:
-        return "IPv4"
-    elif value in ["Event Count", "Bytes Sent", "Bytes Received", "QID"]:
-        return "UInt64"
-    elif value in ["Source Port", "Destination Port", "Domain"]:
-        return "UInt16"
-    elif value in ["Domain", "Magnitude"]:
-        return "UInt8"
-    if value in ["Start Time"]:
-        return "DateTime64(3)"
-    elif value in ["ReportDate", "WeekFrom"]:
-        return "Date"
-    elif value in [
-        "Username",
-        "Error Code",
-        "Threat Name",
-        "Source Hostname",
-        "Event ID",
-        "Logon Type",
-        "Source Workstation",
-        "Process Name",
-        "Policy Name",
-        "Category Description",
-        "URL domain",
-        "bad_key",
-        "Sender",
-        "Recipient",
-        "Command",
-        "Affected Workload",
-        "Application Name",
-        "Account Security ID",
-        "Rule Name",
-        "URL Domain",
-        "Action",
-    ]:
-        return "Nullable(String)"
-    else:
-        return "LowCardinality(String)"
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def rename_event(event):
-    """Cleans and renames event keys efficiently."""
+def get_clickhouse_type_for_dict(key: str) -> str:
+    """
+    Maps event keys to their corresponding ClickHouse data types.
+
+    Args:
+        key (str): The event key.
+
+    Returns:
+        str: The ClickHouse data type.
+    """
+    mapping = {
+        "domainName": "LowCardinality(String)",
+        "Domain": "UInt16",
+        "Event Name": "LowCardinality(String)",
+        "Source Network": "LowCardinality(String)",
+        "Log Source": "LowCardinality(String)",
+        "Low Level Category": "LowCardinality(String)",
+        "Destination Network": "LowCardinality(String)",
+        "Source IP": "IPv4",
+        "Source Port": "UInt16",
+        "Destination IP": "IPv4",
+        "Log Source Type": "LowCardinality(String)",
+        "Destination Port": "UInt16",
+        "Event Count": "UInt64",
+        "Start Time": "DateTime64(3)",
+        "Destination Geographic Country/Region": "LowCardinality(String)",
+        "Username": "LowCardinality(String)",
+        "ReportDate": "Date",
+        "WeekFrom": "Date",
+        # Add other mappings as necessary
+    }
+    return mapping.get(key, "LowCardinality(String)")
+
+
+def rename_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Cleans and renames event keys based on a predefined mapping.
+
+    Args:
+        event (Dict[str, Any]): The original event data.
+
+    Returns:
+        Dict[str, Any]: The renamed event data.
+    """
     mapping = {
         "DomainName(DomainID)": "domainName",
         "domainId": "Domain",
@@ -71,7 +83,6 @@ def rename_event(event):
         "SensorDeviceTypeName(DeviceType)": "Log Source Type",
         "deviceType": "Log Source Type",
         "logsourceid": "Log Source",
-        "destinationip": "Destination IP",
         "userName": "Username",
         "username": "Username",
         "magnitude": "Magnitude",
@@ -94,63 +105,326 @@ def rename_event(event):
     return renamed_event
 
 
-def add_date(line_json):
+def fill_nulls_based_on_type(
+    df: pl.DataFrame, type_mapping: Dict[str, str]
+) -> pl.DataFrame:
     """
-    Enhances a JSON object with date-related fields:
+    Replaces null values in the DataFrame based on the ClickHouse data types.
 
-    - WeekFrom: The previous Saturday's date.
-    - ReportDate: The date extracted from the JSON, formatted.
-    - createdAt: The current UTC timestamp.
-
-    Args: line_json: A dictionary-like JSON object containing either "Start Time" or "Time" (in milliseconds or
-    seconds since the epoch).
+    Args:
+        df (pl.DataFrame): The Polars DataFrame to process.
+        type_mapping (Dict[str, str]): A mapping of column names to ClickHouse data types.
 
     Returns:
-        The modified JSON object.
+        pl.DataFrame: The DataFrame with nulls filled appropriately.
     """
-    try:
-        query_date_epoch = line_json.get("Start Time") or line_json.get("Time")
-
-        if query_date_epoch is None:
-            raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
-
-        # Determine timestamp type (milliseconds or seconds) and adjust if needed
-        if query_date_epoch > 1e10:
-            query_timestamp = query_date_epoch / 1000
+    fill_expressions = []
+    for col in df.columns:
+        ch_type = type_mapping.get(col, "LowCardinality(String)")
+        if ch_type.startswith("LowCardinality(String)") or ch_type.startswith("String"):
+            fill_value = "N/A"
+            fill_expressions.append(pl.col(col).fill_null(fill_value))
+        elif ch_type.startswith(("UInt", "Int")):
+            fill_value = 0
+            fill_expressions.append(pl.col(col).fill_null(fill_value))
+        elif ch_type.startswith("Decimal"):
+            fill_value = Decimal("0.00")
+            fill_expressions.append(pl.col(col).fill_null(fill_value))
+        elif ch_type.startswith("IPv4"):
+            fill_value = "0.0.0.0"
+            fill_expressions.append(pl.col(col).fill_null(fill_value))
+        elif ch_type.startswith("DateTime"):
+            fill_value = datetime(1970, 1, 1)
+            fill_expressions.append(pl.col(col).fill_null(fill_value))
+        elif ch_type.startswith("Date"):
+            fill_value = date(1970, 1, 1)
+            fill_expressions.append(pl.col(col).fill_null(fill_value))
         else:
-            query_timestamp = query_date_epoch
-            line_json["Start Time"] = (
-                query_date_epoch * 1000
-            )  # Converting epoch to epoch milliseconds.
+            # Default to "N/A" for any unspecified types
+            fill_value = "N/A"
+            fill_expressions.append(pl.col(col).fill_null(fill_value))
+    return df.with_columns(fill_expressions)
 
-        base_date = datetime.fromtimestamp(query_timestamp)
-        previous_saturday = base_date + relativedelta(weekday=SA(-1))
-        line_json["WeekFrom"] = previous_saturday.date()
-        line_json["Event Count"] = int(line_json["Event Count"])
-        line_json["ReportDate"] = base_date.date()
 
-        return line_json
-    except KeyError:
-        raise
+def replace_start_time(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Replaces 'Start Time' values that are 0 with the 'Start Time' from the next row.
+
+    Args:
+        df (pl.DataFrame): The Polars DataFrame to process.
+
+    Returns:
+        pl.DataFrame: The DataFrame with 'Start Time' values corrected.
+    """
+    # Replace 'Start Time' == 0 with the next row's 'Start Time'
+    df = df.with_columns(
+        [
+            pl.when(pl.col("Start Time") == 0)
+            .then(pl.col("Start Time").shift(-1))
+            .otherwise(pl.col("Start Time"))
+            .alias("Start Time")
+        ]
+    )
+
+    # For any remaining 'Start Time' == 0 or None (e.g., last row), set to a default valid value
+    # Here, we choose to set it to the epoch start time (0 milliseconds)
+    df = df.with_columns(
+        [
+            pl.when((pl.col("Start Time") == 0) | pl.col("Start Time").is_null())
+            .then(pl.lit(0))  # Epoch start time in milliseconds
+            .otherwise(pl.col("Start Time"))
+            .alias("Start Time")
+        ]
+    )
+
+    return df
+
+
+def validate_dates(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Validates that date columns fall within ClickHouse's acceptable range.
+    Replaces invalid dates with a default value if necessary.
+
+    Args:
+        df (pl.DataFrame): The Polars DataFrame to validate.
+
+    Returns:
+        pl.DataFrame: The validated DataFrame.
+    """
+    min_date = date(1970, 1, 1)
+    df = df.with_columns(
+        [
+            pl.when(pl.col("WeekFrom") < min_date)
+            .then(pl.lit(min_date))
+            .otherwise(pl.col("WeekFrom"))
+            .alias("WeekFrom"),
+            pl.when(pl.col("ReportDate") < min_date)
+            .then(pl.lit(min_date))
+            .otherwise(pl.col("ReportDate"))
+            .alias("ReportDate"),
+        ]
+    )
+    return df
 
 
 def transform_raw(
-    data: List[Dict[str, Any]],
-    query_name: str,
-) -> tuple[list[tuple[Any, ...]], list[str], list[str]]:
-    field_names = list(data[0].keys())  # Get the list of field names from the data
-    rows = [tuple(row[field] for field in field_names) for row in data]  # Create rows
+    data: List[Dict[str, Any]]
+) -> Tuple[List[Tuple[Any, ...]], List[str]]:
+    """
+    Transforms raw batch data into a list of tuples and extracts column names using Polars.
+    Incorporates the functionality of add_date directly into the transformation.
 
-    # Define fields for table creation with appropriate ClickHouse types
-    fields = [f'"{key}" {get_clickhouse_type_for_dict(key)}' for key in field_names]
+    Args:
+        data (List[Dict[str, Any]]): The batch of data to transform.
 
-    # Define summing fields with custom logic based on query_name
+    Returns:
+        Tuple[List[Tuple[Any, ...]], List[str]]: A tuple containing the transformed rows and the list of column names.
+    """
+    if not data:
+        logger.warning("No data provided to transform_raw.")
+        return [], []
+
+    # Rename event keys
+    renamed_data = [rename_event(event) for event in data]
+
+    # Create a Polars DataFrame from the renamed data
+    df = pl.DataFrame(renamed_data, infer_schema_length=settings.clickhouse_batch_size)
+
+    # Check if 'Start Time' exists
+    if "Start Time" not in df.columns:
+        raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
+
+    # Replace 'Start Time' == 0 with the next row's 'Start Time'
+    df = replace_start_time(df)
+
+    # Convert 'Start Time' from milliseconds to seconds if necessary
+    df = df.with_columns(
+        [
+            pl.when(pl.col("Start Time") > 1e10)
+            .then(pl.col("Start Time") / 1000)
+            .otherwise(pl.col("Start Time"))
+            .alias("Start_Time_Seconds")
+        ]
+    )
+
+    # Calculate 'ReportDate' and 'WeekFrom' based on 'Start_Time_Seconds'
+    df = df.with_columns(
+        [
+            pl.col("Start_Time_Seconds")
+            .apply(
+                lambda x: datetime.fromtimestamp(x).date() if x is not None else None,
+                return_dtype=pl.Date,
+            )
+            .alias("ReportDate"),
+            pl.col("Start_Time_Seconds")
+            .apply(
+                lambda x: (
+                    (datetime.fromtimestamp(x) + relativedelta(weekday=SA(-1))).date()
+                    if x is not None
+                    else None
+                ),
+                return_dtype=pl.Date,
+            )
+            .alias("WeekFrom"),
+        ]
+    )
+
+    # Validate dates
+    df = validate_dates(df)
+
+    # Define ClickHouse type mapping for all columns
+    column_names = df.columns
+    type_mapping = {col: get_clickhouse_type_for_dict(col) for col in column_names}
+
+    # Replace nulls based on column types
+    df = fill_nulls_based_on_type(df, type_mapping)
+
+    # Enforce data types to match ClickHouse schema
+    for col, ch_type in type_mapping.items():
+        if ch_type.startswith("UInt16"):
+            df = df.with_columns([pl.col(col).cast(pl.UInt16)])
+        elif ch_type.startswith("UInt64"):
+            df = df.with_columns([pl.col(col).cast(pl.UInt64)])
+        elif ch_type.startswith("Decimal"):
+            df = df.with_columns([pl.col(col).cast(pl.Decimal(10, 2))])
+        elif ch_type.startswith("DateTime"):
+            df = df.with_columns([pl.col(col).cast(pl.Datetime)])
+        elif ch_type.startswith("Date"):
+            df = df.with_columns([pl.col(col).cast(pl.Date)])
+        elif ch_type.startswith("IPv4"):
+            # Polars does not have a native IPv4 type, ensure it's a string in the correct format
+            df = df.with_columns([pl.col(col).cast(pl.Utf8)])
+        elif ch_type.startswith("LowCardinality(String)") or ch_type.startswith(
+            "String"
+        ):
+            df = df.with_columns([pl.col(col).cast(pl.Utf8)])
+        # Add more type casts as necessary
+
+    # Drop the temporary 'Start_Time_Seconds' column
+    df = df.drop("Start_Time_Seconds")
+
+    # Extract column names again in case of any changes
+    column_names = df.columns
+
+    # Convert Polars DataFrame to list of tuples using .rows()
+    rows = df.rows()
+
+    return rows, column_names
+
+
+def transform_first_raw(
+    data: List[Dict[str, Any]], query_name: str
+) -> Tuple[List[Tuple[Any, ...]], List[str], List[str], List[Any]]:
+    """
+    Transforms the first batch of data, prepares fields and summing_fields for ClickHouse table creation using Polars.
+    Incorporates the functionality of add_date directly into the transformation.
+
+    Args:
+        data (List[Dict[str, Any]]): The first batch of data to transform.
+        query_name (str): The name of the query to determine summing_fields.
+
+    Returns:
+        Tuple containing rows, summing_fields, fields, and column_names.
+    """
+    if not data:
+        logger.warning("No data provided to transform_first_raw.")
+        return [], [], [], []
+
+    # Rename event keys
+    renamed_data = [rename_event(event) for event in data]
+
+    # Create a Polars DataFrame from the renamed data
+    df = pl.DataFrame(renamed_data, infer_schema_length=settings.clickhouse_batch_size)
+
+    # Check if 'Start Time' exists
+    if "Start Time" not in df.columns:
+        raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
+
+    # Replace 'Start Time' == 0 with the next row's 'Start Time'
+    df = replace_start_time(df)
+
+    # Convert 'Start Time' from milliseconds to seconds if necessary
+    df = df.with_columns(
+        [
+            pl.when(pl.col("Start Time") > 1e10)
+            .then(pl.col("Start Time") / 1000)
+            .otherwise(pl.col("Start Time"))
+            .alias("Start_Time_Seconds")
+        ]
+    )
+
+    # Calculate 'ReportDate' and 'WeekFrom' based on 'Start_Time_Seconds'
+    df = df.with_columns(
+        [
+            pl.col("Start_Time_Seconds")
+            .apply(
+                lambda x: datetime.fromtimestamp(x).date() if x is not None else None,
+                return_dtype=pl.Date,
+            )
+            .alias("ReportDate"),
+            pl.col("Start_Time_Seconds")
+            .apply(
+                lambda x: (
+                    (datetime.fromtimestamp(x) + relativedelta(weekday=SA(-1))).date()
+                    if x is not None
+                    else None
+                ),
+                return_dtype=pl.Date,
+            )
+            .alias("WeekFrom"),
+        ]
+    )
+
+    # Validate dates
+    df = validate_dates(df)
+
+    # Define ClickHouse type mapping for all columns
+    column_names = df.columns
+    type_mapping = {col: get_clickhouse_type_for_dict(col) for col in column_names}
+
+    # Replace nulls based on column types
+    df = fill_nulls_based_on_type(df, type_mapping)
+
+    # Enforce data types to match ClickHouse schema
+    for col, ch_type in type_mapping.items():
+        if ch_type.startswith("UInt16"):
+            df = df.with_columns([pl.col(col).cast(pl.UInt16)])
+        elif ch_type.startswith("UInt64"):
+            df = df.with_columns([pl.col(col).cast(pl.UInt64)])
+        elif ch_type.startswith("Decimal"):
+            df = df.with_columns([pl.col(col).cast(pl.Decimal(10, 2))])
+        elif ch_type.startswith("DateTime"):
+            df = df.with_columns([pl.col(col).cast(pl.Datetime)])
+        elif ch_type.startswith("Date"):
+            df = df.with_columns([pl.col(col).cast(pl.Date)])
+        elif ch_type.startswith("IPv4"):
+            # Polars does not have a native IPv4 type, ensure it's a string in the correct format
+            df = df.with_columns([pl.col(col).cast(pl.Utf8)])
+        elif ch_type.startswith("LowCardinality(String)") or ch_type.startswith(
+            "String"
+        ):
+            df = df.with_columns([pl.col(col).cast(pl.Utf8)])
+        # Add more type casts as necessary
+
+    # Drop the temporary 'Start_Time_Seconds' column
+    df = df.drop("Start_Time_Seconds")
+
+    # Extract column names again in case of any changes
+    column_names = df.columns
+
+    # Convert Polars DataFrame to list of tuples using .rows()
+    rows = df.rows()
+
+    # Define fields for ClickHouse table creation with appropriate types
+    fields = [f'"{key}" {get_clickhouse_type_for_dict(key)}' for key in column_names]
+
+    # Define summing_fields based on query_name
     if query_name == "AllowedOutboundTraffic":
         custom_order = ["WeekFrom", "Destination IP", "Destination Port"]
     elif query_name == "AllowedInboundTraffic":
         custom_order = ["WeekFrom", "Source IP"]
     elif query_name == "TopSecurityEvents":
-        custom_order = ["WeekFrom", "High Level Category", "Event Name"]
+        custom_order = ["WeekFrom", "Low Level Category", "Event Name"]
     elif query_name in ["AuthenticationFailure", "AuthenticationSuccess", "VPNAccess"]:
         custom_order = ["WeekFrom", "Username"]
     elif query_name in ["CREEvents", "UBA"]:
@@ -162,180 +436,11 @@ def transform_raw(
     summing_fields = [
         f'toStartOfHour("{key}")' if key == "Start Time" else f'"{key}"'
         for key in custom_order
-        if key in field_names
+        if key in column_names
     ] + [
         f'toStartOfHour("{key}")' if key == "Start Time" else f'"{key}"'
-        for key in field_names
+        for key in column_names
         if key not in custom_order and key not in ["Event Count", "Score"]
     ]
 
-    return rows, summing_fields, fields
-
-
-# TODO: Replace these in the rename event function
-# def clean_column_name(field_name: str) -> str:
-#     """Removes special characters from column names."""
-#     return (
-#         field_name.replace(" ", "_")
-#         .replace("/", "_")
-#         .replace("(", "_")
-#         .replace(")", "_")
-#         .replace(",", "_")
-#     )
-#
-#
-# def convert_value(field_name: str, value: Any) -> Any:
-#     """Converts values to appropriate types for Arrow table."""
-#     if field_name in [
-#         "Source_IP",
-#         "Destination_IP",
-#         "destinationip",
-#         "sourceip",
-#     ] and is_ipv4_address(value):
-#         return str(value)
-#     elif field_name == "Start_Time":
-#         # Convert epoch milliseconds to datetime
-#         if isinstance(value, (int, float)):
-#             if value > 1e10:
-#                 return pa.scalar(value, type=pa.timestamp("ms"))
-#             else:
-#                 return pa.scalar(value * 1000, type=pa.timestamp("ms"))
-#         else:
-#             logger.warning(f"Unexpected value type for Start_Time: {value}")
-#             return None
-#     elif isinstance(value, datetime):
-#         return value.isoformat()
-#     return value
-#
-#
-# def is_ipv4_address(value: Any) -> bool:
-#     """Checks if the value is a valid IPv4 address."""
-#     try:
-#         ipaddress.IPv4Address(value)
-#         return True
-#     except ValueError:
-#         return False
-#
-#
-# def get_clickhouse_type(field_name: str, dtype: pa.DataType) -> str:
-#     """Infers ClickHouse data type from a PyArrow dtype and field name."""
-#     if pa.types.is_int64(dtype):
-#         return "Nullable(Int64)"
-#     elif pa.types.is_float64(dtype):
-#         return "Nullable(Float64)"
-#     elif pa.types.is_decimal128(dtype):
-#         return "Nullable(Decimal)"
-#     elif pa.types.is_string(dtype):
-#         if field_name in ["Source_IP", "Destination_IP"]:
-#             return "Nullable(IPv4)"
-#         if field_name == "Event_Count":
-#             return "Int64"
-#         return "Nullable(String)"
-#     elif pa.types.is_timestamp(dtype):
-#         return "DateTime64(3)"
-#     elif pa.types.is_boolean(dtype):
-#         return "Nullable(UInt8)"
-#     elif pa.types.is_binary(dtype):
-#         return "Nullable(String)"
-#     elif pa.types.is_null(dtype):
-#         return "Nullable(String)"
-#     else:
-#         raise ValueError(f"Unsupported data type: {dtype}")
-#
-#
-# def transform_to_arrow(
-#     data: List[Dict[str, Any]],
-# ) -> Tuple[pa.Table, List[str], List[str]]:
-#     """Transforms a list of dictionaries into an Arrow table and prepares metadata for ClickHouse."""
-#     try:
-#         # Clean column names
-#         cleaned_data = [{clean_column_name(k): v for k, v in d.items()} for d in data]
-#
-#         # Convert values to appropriate types
-#         array_data = {
-#             key: [convert_value(key, d[key]) for d in cleaned_data]
-#             for key in cleaned_data[0].keys()
-#         }
-#
-#         # Convert to PyArrow Table
-#         data_table = pa.table(array_data)
-#         schema = data_table.schema
-#
-#         # Prepare ClickHouse field definitions
-#         fields = [
-#             f"{field.name} {get_clickhouse_type(field.name, field.type)}"
-#             for field in schema
-#         ]
-#
-#         # Prepare summing fields for ClickHouse if required
-#         summing_fields = [
-#             (
-#                 f"toStartOfHour({field.name})"
-#                 if field.name == "Start_Time"
-#                 else field.name
-#             )
-#             for field in schema
-#             if field.name != "Event_Count"
-#         ]
-#
-#         return data_table, summing_fields, fields
-#     except Exception as ee:
-#         logger.error(f"Data Transformation Failed: {ee}")
-#         raise
-#
-#
-# def get_clickhouse_type_for_dataframe(dtype, col_name: str = None) -> str:
-#     """Maps Pandas data types to ClickHouse data types."""
-#     type_map = {
-#         "object": "String",  # Pandas uses 'object' for strings
-#         "int64": "Int64",
-#         "float64": "Float64",
-#         "bool": "UInt8",
-#         "datetime64[ns]": "DateTime64(3)",  # Pandas datetime type
-#         "datetime64[ns, UTC]": "DateTime64(3)",  # Handle timezone-aware datetime
-#         "date": "Date",  # For Pandas date
-#         # Add more mappings as needed
-#     }
-#
-#     # Special handling for IP addresses
-#     if col_name in ("ReportDate", "WeekFrom"):
-#         return "Date"
-#
-#     return type_map.get(
-#         dtype.name, "String"
-#     )  # Default to String if not found in the map
-#
-#
-# def transform_to_dataframe(
-#     data: List[Dict[str, Any]]
-# ) -> Tuple[pd.DataFrame, List[str], List[str]]:
-#     """Transforms data to a Pandas DataFrame and prepares metadata for ClickHouse."""
-#     try:
-#         # Create DataFrame
-#         df = pd.DataFrame(data)
-#         df["Start Time"] = pd.to_datetime(df["Start Time"], unit="ms")
-#         df["ReportDate"] = pd.to_datetime(df["ReportDate"], format="%d/%m/%Y").dt.date
-#         df["WeekFrom"] = pd.to_datetime(df["WeekFrom"], format="%d/%m/%Y").dt.date
-#         df.columns = df.columns.map(clean_column_name)
-#         # Field definitions for ClickHouse table schema
-#         fields = [
-#             (
-#                 f'"{col}" Nullable({get_clickhouse_type_for_dataframe(dtype=df[col].dtype, col_name=col)})'
-#                 if col == "Policy Name"
-#                 else f'"{col}" {get_clickhouse_type_for_dataframe(dtype=df[col].dtype, col_name=col)}'
-#             )
-#             for col in df.columns
-#         ]
-#
-#         # Summing fields for potential SummingMergeTree table (optional)
-#         summing_fields = [
-#             (f'toStartOfHour("{col}")' if col == "Start Time" else f'"{col}"')
-#             for col in df.columns
-#             if col != "Event Count"
-#         ]
-#
-#         return df, summing_fields, fields
-#
-#     except Exception as e:
-#         print(f"Transformation failed: {e}")
-#         raise
+    return rows, summing_fields, fields, column_names

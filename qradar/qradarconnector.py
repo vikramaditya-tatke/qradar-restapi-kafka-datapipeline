@@ -20,13 +20,12 @@ class QRadarConnector:
             "SEC": sec_token,
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "Version": "20.0",
+            "Version": "22.0",
         }
         self.sec_token = sec_token
         self.base_url = base_url
         self.default_timeout = settings.default_timeout
         self.max_search_ttc_in_seconds = settings.max_search_ttc_in_seconds
-        self.batch_size_limit = settings.batch_size_limit * 1023  # Just under 1MB
         self.current_record_count = 0
 
     def _make_request(self, method: str, url: str, **kwargs) -> Response:
@@ -45,7 +44,11 @@ class QRadarConnector:
         """
         try:
             response = self.session.request(
-                method, url, timeout=self.default_timeout, verify=False, **kwargs
+                method=method,
+                url=url,
+                timeout=self.default_timeout,
+                verify=False,
+                **kwargs,
             )
             response.raise_for_status()  # Raise an exception for HTTP errors
             return response
@@ -67,10 +70,14 @@ class QRadarConnector:
             dict: Response Header
         """
         url = f"{self.base_url}/api/ariel/searches"
-        response = self._make_request(
-            method="POST", url=url, params={"query_expression": query_expression}
-        )
-        return response.json()
+
+        try:
+            response = self._make_request(
+                method="POST", url=url, params={"query_expression": query_expression}
+            )
+            return response.json()
+        except requests.exceptions.HTTPError as http_err:
+            raise
 
     def get_search_status(self, cursor_id: str) -> dict:
         """Gets the status of a QRadar search using the cursor ID.
