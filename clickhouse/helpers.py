@@ -1,8 +1,7 @@
 # helpers.py
 
 import logging
-from datetime import datetime, date
-from decimal import Decimal
+from datetime import datetime
 from typing import List, Dict, Any, Tuple
 
 import polars as pl
@@ -13,6 +12,48 @@ from settings import settings
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def add_date(line_json):
+    """
+    Enhances a JSON object with date-related fields:
+
+    - WeekFrom: The previous Saturday's date.
+    - ReportDate: The date extracted from the JSON, formatted.
+    - createdAt: The current UTC timestamp.
+
+    Args: line_json: A dictionary-like JSON object containing either "Start Time" or "Time" (in milliseconds or
+    seconds since the epoch).
+
+    Returns:
+        The modified JSON object.
+    """
+    try:
+        query_date_epoch = line_json["Start Time"]
+
+        if query_date_epoch is None:
+            raise KeyError("Missing 'Start Time' or 'Time' key in JSON data.")
+        elif query_date_epoch == 0:
+            raise ValueError("Qradar is sending Start Time as 0 epochs")
+
+        # Determine timestamp type (milliseconds or seconds) and adjust if needed
+        if query_date_epoch > 1e10:
+            query_timestamp = query_date_epoch / 1000
+        else:
+            query_timestamp = query_date_epoch
+            line_json["Start Time"] = (
+                query_date_epoch * 1000
+            )  # Converting epoch to epoch milliseconds.
+
+        base_date = datetime.fromtimestamp(query_timestamp)
+        previous_saturday = base_date + relativedelta(weekday=SA(-1))
+        line_json["WeekFrom"] = previous_saturday.date()
+        line_json["Event Count"] = int(line_json["Event Count"])
+        line_json["ReportDate"] = base_date.date()
+        line_json["Start Time"] = base_date
+        return line_json
+    except KeyError:
+        raise
 
 
 def get_clickhouse_type_for_dict(key: str) -> str:
@@ -124,26 +165,18 @@ def fill_nulls_based_on_type(
         if ch_type.startswith("LowCardinality(String)") or ch_type.startswith("String"):
             fill_value = "N/A"
             fill_expressions.append(pl.col(col).fill_null(fill_value))
-        elif ch_type.startswith(("UInt", "Int")):
-            fill_value = 0
-            fill_expressions.append(pl.col(col).fill_null(fill_value))
-        elif ch_type.startswith("Decimal"):
-            fill_value = Decimal("0.00")
-            fill_expressions.append(pl.col(col).fill_null(fill_value))
-        elif ch_type.startswith("IPv4"):
-            fill_value = "0.0.0.0"
-            fill_expressions.append(pl.col(col).fill_null(fill_value))
-        elif ch_type.startswith("DateTime"):
-            fill_value = datetime(1970, 1, 1)
-            fill_expressions.append(pl.col(col).fill_null(fill_value))
-        elif ch_type.startswith("Date"):
-            fill_value = date(1970, 1, 1)
-            fill_expressions.append(pl.col(col).fill_null(fill_value))
-        else:
-            # Default to "N/A" for any unspecified types
-            fill_value = "N/A"
-            fill_expressions.append(pl.col(col).fill_null(fill_value))
-    return df.with_columns(fill_expressions)
+        # elif ch_type.startswith(("UInt", "Int")):
+        #     fill_value = 0
+        #     fill_expressions.append(pl.col(col).fill_null(fill_value))
+        # elif ch_type.startswith("Decimal"):
+        #     fill_value = Decimal("0.00")
+        #     fill_expressions.append(pl.col(col).fill_null(fill_value))
+        # else:
+        #     # Default to "N/A" for any unspecified types
+        #     fill_value = "N/A"
+        #     fill_expressions.append(pl.col(col).fill_null(fill_value))
+        df = df.with_columns(fill_expressions)
+    return df
 
 
 def replace_start_time(df: pl.DataFrame) -> pl.DataFrame:
@@ -163,45 +196,6 @@ def replace_start_time(df: pl.DataFrame) -> pl.DataFrame:
             .then(pl.col("Start Time").shift(-1))
             .otherwise(pl.col("Start Time"))
             .alias("Start Time")
-        ]
-    )
-
-    # For any remaining 'Start Time' == 0 or None (e.g., last row), set to a default valid value
-    # Here, we choose to set it to the epoch start time (0 milliseconds)
-    df = df.with_columns(
-        [
-            pl.when((pl.col("Start Time") == 0) | pl.col("Start Time").is_null())
-            .then(pl.lit(0))  # Epoch start time in milliseconds
-            .otherwise(pl.col("Start Time"))
-            .alias("Start Time")
-        ]
-    )
-
-    return df
-
-
-def validate_dates(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Validates that date columns fall within ClickHouse's acceptable range.
-    Replaces invalid dates with a default value if necessary.
-
-    Args:
-        df (pl.DataFrame): The Polars DataFrame to validate.
-
-    Returns:
-        pl.DataFrame: The validated DataFrame.
-    """
-    min_date = date(1970, 1, 1)
-    df = df.with_columns(
-        [
-            pl.when(pl.col("WeekFrom") < min_date)
-            .then(pl.lit(min_date))
-            .otherwise(pl.col("WeekFrom"))
-            .alias("WeekFrom"),
-            pl.when(pl.col("ReportDate") < min_date)
-            .then(pl.lit(min_date))
-            .otherwise(pl.col("ReportDate"))
-            .alias("ReportDate"),
         ]
     )
     return df
@@ -230,47 +224,15 @@ def transform_raw(
     # Create a Polars DataFrame from the renamed data
     df = pl.DataFrame(renamed_data, infer_schema_length=settings.clickhouse_batch_size)
 
-    # Check if 'Start Time' exists
-    if "Start Time" not in df.columns:
-        raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
+    # # Check if 'Start Time' exists
+    # if "Start Time" not in df.columns:
+    #     raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
 
     # Replace 'Start Time' == 0 with the next row's 'Start Time'
-    df = replace_start_time(df)
-
-    # Convert 'Start Time' from milliseconds to seconds if necessary
-    df = df.with_columns(
-        [
-            pl.when(pl.col("Start Time") > 1e10)
-            .then(pl.col("Start Time") / 1000)
-            .otherwise(pl.col("Start Time"))
-            .alias("Start_Time_Seconds")
-        ]
-    )
-
-    # Calculate 'ReportDate' and 'WeekFrom' based on 'Start_Time_Seconds'
-    df = df.with_columns(
-        [
-            pl.col("Start_Time_Seconds")
-            .apply(
-                lambda x: datetime.fromtimestamp(x).date() if x is not None else None,
-                return_dtype=pl.Date,
-            )
-            .alias("ReportDate"),
-            pl.col("Start_Time_Seconds")
-            .apply(
-                lambda x: (
-                    (datetime.fromtimestamp(x) + relativedelta(weekday=SA(-1))).date()
-                    if x is not None
-                    else None
-                ),
-                return_dtype=pl.Date,
-            )
-            .alias("WeekFrom"),
-        ]
-    )
+    # df = replace_start_time(df)
 
     # Validate dates
-    df = validate_dates(df)
+    # df = validate_dates(df)
 
     # Define ClickHouse type mapping for all columns
     column_names = df.columns
@@ -285,23 +247,14 @@ def transform_raw(
             df = df.with_columns([pl.col(col).cast(pl.UInt16)])
         elif ch_type.startswith("UInt64"):
             df = df.with_columns([pl.col(col).cast(pl.UInt64)])
-        elif ch_type.startswith("Decimal"):
-            df = df.with_columns([pl.col(col).cast(pl.Decimal(10, 2))])
         elif ch_type.startswith("DateTime"):
             df = df.with_columns([pl.col(col).cast(pl.Datetime)])
         elif ch_type.startswith("Date"):
             df = df.with_columns([pl.col(col).cast(pl.Date)])
-        elif ch_type.startswith("IPv4"):
-            # Polars does not have a native IPv4 type, ensure it's a string in the correct format
-            df = df.with_columns([pl.col(col).cast(pl.Utf8)])
-        elif ch_type.startswith("LowCardinality(String)") or ch_type.startswith(
-            "String"
-        ):
-            df = df.with_columns([pl.col(col).cast(pl.Utf8)])
         # Add more type casts as necessary
 
     # Drop the temporary 'Start_Time_Seconds' column
-    df = df.drop("Start_Time_Seconds")
+    # df = df.drop("Start_Time_Seconds")
 
     # Extract column names again in case of any changes
     column_names = df.columns
@@ -337,46 +290,36 @@ def transform_first_raw(
     df = pl.DataFrame(renamed_data, infer_schema_length=settings.clickhouse_batch_size)
 
     # Check if 'Start Time' exists
-    if "Start Time" not in df.columns:
-        raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
+    # if "Start Time" not in df.columns:
+    #     raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
 
     # Replace 'Start Time' == 0 with the next row's 'Start Time'
-    df = replace_start_time(df)
-
-    # Convert 'Start Time' from milliseconds to seconds if necessary
-    df = df.with_columns(
-        [
-            pl.when(pl.col("Start Time") > 1e10)
-            .then(pl.col("Start Time") / 1000)
-            .otherwise(pl.col("Start Time"))
-            .alias("Start_Time_Seconds")
-        ]
-    )
+    # df = replace_start_time(df)
 
     # Calculate 'ReportDate' and 'WeekFrom' based on 'Start_Time_Seconds'
-    df = df.with_columns(
-        [
-            pl.col("Start_Time_Seconds")
-            .apply(
-                lambda x: datetime.fromtimestamp(x).date() if x is not None else None,
-                return_dtype=pl.Date,
-            )
-            .alias("ReportDate"),
-            pl.col("Start_Time_Seconds")
-            .apply(
-                lambda x: (
-                    (datetime.fromtimestamp(x) + relativedelta(weekday=SA(-1))).date()
-                    if x is not None
-                    else None
-                ),
-                return_dtype=pl.Date,
-            )
-            .alias("WeekFrom"),
-        ]
-    )
+    # df = df.with_columns(
+    #     [
+    #         pl.col("Start_Time_Seconds")
+    #         .apply(
+    #             lambda x: datetime.fromtimestamp(x).date() if x is not None else None,
+    #             return_dtype=pl.Date,
+    #         )
+    #         .alias("ReportDate"),
+    #         pl.col("Start_Time_Seconds")
+    #         .apply(
+    #             lambda x: (
+    #                 (datetime.fromtimestamp(x) + relativedelta(weekday=SA(-1))).date()
+    #                 if x is not None
+    #                 else None
+    #             ),
+    #             return_dtype=pl.Date,
+    #         )
+    #         .alias("WeekFrom"),
+    #     ]
+    # )
 
     # Validate dates
-    df = validate_dates(df)
+    # df = validate_dates(df)
 
     # Define ClickHouse type mapping for all columns
     column_names = df.columns
@@ -391,23 +334,14 @@ def transform_first_raw(
             df = df.with_columns([pl.col(col).cast(pl.UInt16)])
         elif ch_type.startswith("UInt64"):
             df = df.with_columns([pl.col(col).cast(pl.UInt64)])
-        elif ch_type.startswith("Decimal"):
-            df = df.with_columns([pl.col(col).cast(pl.Decimal(10, 2))])
         elif ch_type.startswith("DateTime"):
             df = df.with_columns([pl.col(col).cast(pl.Datetime)])
         elif ch_type.startswith("Date"):
             df = df.with_columns([pl.col(col).cast(pl.Date)])
-        elif ch_type.startswith("IPv4"):
-            # Polars does not have a native IPv4 type, ensure it's a string in the correct format
-            df = df.with_columns([pl.col(col).cast(pl.Utf8)])
-        elif ch_type.startswith("LowCardinality(String)") or ch_type.startswith(
-            "String"
-        ):
-            df = df.with_columns([pl.col(col).cast(pl.Utf8)])
-        # Add more type casts as necessary
+    # Add more type casts as necessary
 
     # Drop the temporary 'Start_Time_Seconds' column
-    df = df.drop("Start_Time_Seconds")
+    # df = df.drop("Start_Time_Seconds")
 
     # Extract column names again in case of any changes
     column_names = df.columns

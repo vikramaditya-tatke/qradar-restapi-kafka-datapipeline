@@ -223,8 +223,8 @@ async def process_all_customers(settings: Settings, console: str):
 
     # Semaphores to limit concurrency
     customer_semaphore = asyncio.Semaphore(5)  # Limit concurrent customers
-    query_semaphore = asyncio.Semaphore(10)  # Limit concurrent queries per customer
-    etl_semaphore = asyncio.Semaphore(5)  # Limit concurrent ETL processes
+    query_semaphore = asyncio.Semaphore(2)  # Limit concurrent queries per customer
+    etl_semaphore = asyncio.Semaphore(10)  # Limit concurrent ETL processes
 
     tasks: List[asyncio.Task] = []
 

@@ -62,12 +62,14 @@ class ETLPipeline:
         ):  # Use the method within the class
             current_record_count += 1
             # self.progress_bar.update()
-            # event = helpers.add_date(event)
+            try:
+                event = helpers.add_date(event)
+                if len(batch) >= settings.clickhouse_batch_size:
+                    yield batch, current_record_count
+                    batch = []
+            except ValueError as ve:
+                continue
             batch.append(event)
-
-            if len(batch) >= settings.clickhouse_batch_size:
-                yield batch, current_record_count
-                batch = []
         if batch:
             yield batch, current_record_count
 
@@ -166,6 +168,16 @@ class ETLPipeline:
                     "QRadarLog": self.qradar_log,
                 },
             )
+
+        except ValueError as ve:
+            logger.error(
+                f"ETL failed: Missing Field - {ve}",
+                extra={
+                    "ApplicationLog": self.search_params,
+                    "QRadarLog": self.qradar_log,
+                },
+            )
+            raise
 
         except KeyError as ke:
             logger.error(
