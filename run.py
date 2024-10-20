@@ -1,6 +1,6 @@
 import argparse
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from multiprocessing import Pool
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List
 
@@ -12,9 +12,6 @@ from pipeline_logger import logger
 from qradar.qradarconnector import QRadarConnector
 from qradar.search_executor import search_executor
 from settings import Settings
-
-# At the top of your module
-executor = ThreadPoolExecutor(max_workers=10)
 
 
 @dataclass
@@ -28,173 +25,196 @@ class QueryResult:
     parser_key: str
 
 
-async def execute_query(
+def process_query(
     qradar_connector: QRadarConnector,
     event_processor: int,
     customer_name: str,
     query: Dict[str, str],
     duration: Dict[str, str],
-    semaphore: asyncio.Semaphore,
 ) -> Optional[QueryResult]:
-    """Executes a single query asynchronously and returns the result."""
-    async with semaphore:
-        try:
-            result = await asyncio.to_thread(
-                search_executor,
-                event_processor,
-                customer_name,
-                query,
-                duration,
-                qradar_connector,
-            )
-            if result and result["response_header"]["record_count"] > 0:
-                logger.debug(
-                    f"Query executed successfully for {customer_name}",
-                    extra={"customer_name": customer_name, "query": query},
-                )
-                return QueryResult(
-                    event_processor=event_processor,
-                    customer_name=customer_name,
-                    query=query,
-                    duration=duration,
-                    response_header=result["response_header"],
-                    attempt=result["attempt"],
-                    parser_key=result["parser_key"],
-                )
-            elif result:
-                logger.info(
-                    f"No records found for {customer_name}",
-                    extra={"customer_name": customer_name, "query": query},
-                )
-                return None
-        except Exception as e:
-            logger.error(
-                f"Error executing query for {customer_name}: {e}",
-                exc_info=True,
+    """Process a single query and execute ETL if query has data."""
+    try:
+        # Execute the query
+        result = search_executor(
+            event_processor, customer_name, query, duration, qradar_connector
+        )
+
+        if result and result["response_header"]["record_count"] > 0:
+            logger.debug(
+                f"Query executed successfully for {customer_name}",
                 extra={"customer_name": customer_name, "query": query},
             )
-            return None
-
-
-async def process_etl(
-    qradar_connector: QRadarConnector,
-    result: QueryResult,
-    semaphore: asyncio.Semaphore,
-):
-    """Processes ETL for a single result."""
-    async with semaphore:
-        try:
-            response = await asyncio.to_thread(
-                qradar_connector.fetch_data,
-                result.response_header["cursor_id"],
-                result.response_header["record_count"],
+            # Prepare the result for further ETL processing
+            query_result = QueryResult(
+                event_processor=event_processor,
+                customer_name=customer_name,
+                query=query,
+                duration=duration,
+                response_header=result["response_header"],
+                attempt=result["attempt"],
+                parser_key=result["parser_key"],
             )
-            await asyncio.to_thread(
-                etl,
-                response=response,
-                search_params={
-                    "event_processor": int(result.event_processor),
-                    "customer_name": result.customer_name,
-                    "query": result.query,
-                    "response_header": result.response_header,
-                    "attempt": result.attempt,
-                    "parser_key": result.parser_key,
-                },
-                base_url=qradar_connector.base_url,
-            )
+
+            # Run ETL for this query
+            process_etl(qradar_connector, query_result)
+
+        elif result:
             logger.info(
-                f"ETL process completed for {result.customer_name}",
-                extra={"customer_name": result.customer_name},
-            )
-        except Exception as e:
-            logger.error(
-                f"ETL process failed for {result.customer_name}: {e}",
-                exc_info=True,
-                extra={"customer_name": result.customer_name},
+                f"No records found for {customer_name}",
+                extra={"customer_name": customer_name, "query": query},
             )
 
+    except Exception as e:
+        logger.error(
+            f"Error processing query for {customer_name}: {e}",
+            exc_info=True,
+            extra={"customer_name": customer_name, "query": query},
+        )
+        return None
 
-async def process_customer(
+
+def process_etl(qradar_connector: QRadarConnector, result: QueryResult):
+    """Processes ETL for a single result."""
+    try:
+        response = qradar_connector.fetch_data(
+            result.response_header["cursor_id"],
+            result.response_header["record_count"],
+        )
+        etl(
+            response=response,
+            search_params={
+                "event_processor": int(result.event_processor),
+                "customer_name": result.customer_name,
+                "query": result.query,
+                "response_header": result.response_header,
+                "attempt": result.attempt,
+                "parser_key": result.parser_key,
+            },
+            base_url=qradar_connector.base_url,
+        )
+        logger.info(
+            f"ETL process completed for {result.customer_name}",
+            extra={"customer_name": result.customer_name},
+        )
+    except Exception as e:
+        logger.error(
+            f"ETL process failed for {result.customer_name}: {e}",
+            exc_info=True,
+            extra={"customer_name": result.customer_name},
+        )
+
+
+def process_customer(
     qradar_connector: QRadarConnector,
     event_processor: int,
     customer_name: str,
     queries: Dict[str, str],
     duration: Dict[str, str],
-    query_semaphore: asyncio.Semaphore,
-    etl_semaphore: asyncio.Semaphore,
+    max_threads: int
 ):
-    """Processes all queries for a single customer."""
+    """Processes all queries for a single customer using threads."""
     try:
-        # Execute queries
-        query_tasks: List[asyncio.Task] = []
-        for name, expression in queries.items():
-            task = asyncio.create_task(
-                execute_query(
+        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+            # Submit each query to a thread
+            future_to_query = {
+                executor.submit(
+                    process_query,
                     qradar_connector,
                     event_processor,
                     customer_name,
                     {"query_name": name, "query_expression": expression},
                     duration,
-                    query_semaphore,
-                )
-            )
-            query_tasks.append(task)
+                ): name
+                for name, expression in queries.items()
+            }
 
-        results = await asyncio.gather(*query_tasks, return_exceptions=True)
+            # Collect the results as they complete
+            for future in as_completed(future_to_query):
+                query_name = future_to_query[future]
+                try:
+                    future.result()  # We call result() to raise any exceptions
+                except Exception as e:
+                    logger.error(
+                        f"Query execution error for {customer_name} on query {query_name}: {e}",
+                        exc_info=True,
+                        extra={"customer_name": customer_name},
+                    )
 
-        # Handle exceptions and collect successful results
-        successful_results: List[QueryResult] = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(
-                    f"Query execution error for {customer_name}: {result}",
-                    exc_info=True,
-                    extra={"customer_name": customer_name},
-                )
-            elif isinstance(result, QueryResult):
-                successful_results.append(result)
-            elif result is None:
-                logger.info(
-                    f"No data returned for query for {customer_name}",
-                    extra={"customer_name": customer_name},
-                )
-            else:
-                logger.warning(
-                    f"Unexpected result type for {customer_name}: {type(result)}",
-                    extra={"customer_name": customer_name},
-                )
-
-        # Process ETL for successful results
-        etl_tasks: List[asyncio.Task] = []
-        for result in successful_results:
-            task = asyncio.create_task(
-                process_etl(qradar_connector, result, etl_semaphore)
-            )
-            etl_tasks.append(task)
-
-        await asyncio.gather(*etl_tasks, return_exceptions=True)
     except Exception as e:
         logger.error(
-            f"Error during processing for {customer_name}: {e}",
+            f"Error processing customer {customer_name}: {e}",
             exc_info=True,
             extra={"customer_name": customer_name},
         )
     finally:
         logger.info(
-            f"Process completed for {customer_name}",
+            f"Finished processing customer {customer_name}",
             extra={"customer_name": customer_name},
         )
 
 
-async def process_all_customers(settings: Settings, console: str):
-    """Processes all customers and event processors."""
+def process_event_processor(
+    ep: int,
+    customers: List[str],
+    queries: Dict[str, str],
+    duration: Dict[str, str],
+    token: str,
+    ip: str,
+    max_threads: int
+):
+    """Processes all customers for a given event processor (EP) in a single process."""
+    session = Session()
+    qradar_connector = QRadarConnector(
+        sec_token=token,
+        session=session,
+        base_url=f"https://{ip}",
+    )
+
+    for customer_name in customers:
+        process_customer(qradar_connector, ep, customer_name, queries, duration, max_threads)
+
+
+def process_console(console_attr: str, max_threads: int):
+    """Processes all event processors for a given console."""
+    settings = Settings()
     attributes = load_attributes()
     ep_client_list = attributes.get("ep_client_list")
     queries = attributes["queries"]
     duration = attributes["duration"]
 
-    session = Session()
+    # Retrieve token and IP for the specified console
+    token = getattr(settings, f"{console_attr}_token")
+    ip = getattr(settings, f"{console_attr}_ip")
 
+    # Create arguments for multiprocessing
+    etl_params = [(ep, customers, queries, duration, token, ip, max_threads) for ep, customers in ep_client_list.items()]
+
+    # Process each EP using multiprocessing
+    with Pool(processes=len(ep_client_list)) as pool:
+        pool.starmap(process_event_processor, etl_params)
+
+
+def main():
+    """Main entry point for the ETL process."""
+
+    parser = argparse.ArgumentParser(description="Run the QRadar ETL pipeline for a specific console")
+    parser.add_argument(
+        "--console",
+        type=str,
+        required=True,
+        help="Specify the QRadar console to use (e.g., 1, us, uae)",
+    )
+    parser.add_argument(
+        "--max-threads",
+        type=int,
+        default=5,
+        help="Specify the maximum number of threads per event processor (default is 5)",
+    )
+    args = parser.parse_args()
+
+    logger.debug("Application Started")
+
+    # Console mapping
     console_mapping = {
         "1": "console_1",
         "2": "console_2",
@@ -205,86 +225,23 @@ async def process_all_customers(settings: Settings, console: str):
         "us": "console_us",
     }
 
-    console_attr = console_mapping.get(console)
-
-    if console_attr is None:
-        raise ValueError(
-            f"Invalid console '{console}' specified. Available options: {list(console_mapping.keys())}"
-        )
-
-    token = getattr(settings, f"{console_attr}_token")
-    ip = getattr(settings, f"{console_attr}_ip")
-
-    qradar_connector = QRadarConnector(
-        sec_token=token,
-        session=session,
-        base_url=f"https://{ip}",
-    )
-
-    # Semaphores to limit concurrency
-    customer_semaphore = asyncio.Semaphore(5)  # Limit concurrent customers
-    query_semaphore = asyncio.Semaphore(2)  # Limit concurrent queries per customer
-    etl_semaphore = asyncio.Semaphore(10)  # Limit concurrent ETL processes
-
-    tasks: List[asyncio.Task] = []
-
-    for ep, customer_names in ep_client_list.items():
-        for customer_name in customer_names:
-            async with customer_semaphore:
-                task = asyncio.create_task(
-                    process_customer(
-                        qradar_connector,
-                        event_processor=ep,
-                        customer_name=customer_name,
-                        queries=queries,
-                        duration=duration,
-                        query_semaphore=query_semaphore,
-                        etl_semaphore=etl_semaphore,
-                    )
-                )
-                tasks.append(task)
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # Handle exceptions from customer processing
-    for result in results:
-        if isinstance(result, Exception):
-            logger.error(
-                f"Error processing customer: {result}",
-                exc_info=True,
-            )
-
-
-async def main():
-    """Main entry point for the ETL process."""
-    parser = argparse.ArgumentParser(description="Run the QRadar ETL pipeline")
-    parser.add_argument(
-        "--console",
-        type=str,
-        required=False,
-        help="Specify the QRadar console to use (e.g., 1, us, uae)",
-    )
-    args = parser.parse_args()
-
-    logger.debug("Application Started")
-    settings = Settings()
-
+    # Validate and retrieve console attributes
     try:
-        await process_all_customers(settings, "1")
+        # Process all event processors for the given console
+        console_attr = console_mapping.get(args.console)
+        if console_attr is None:
+            raise ValueError(
+                f"Invalid console '{args.console}' specified. Available options: {list(console_mapping.keys())}"
+            )
+        process_console(console_attr, args.max_threads)
     except Exception as e:
         logger.critical(
             f"Unexpected error during main execution: {e}",
             exc_info=True,
         )
     finally:
-        pending = asyncio.all_tasks()
-        if pending:
-            logger.debug(f"Pending tasks at exit")
-        else:
-            logger.debug("No pending tasks.")
         logger.debug("Exiting program")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    executor.shutdown(wait=True)
+    main()
