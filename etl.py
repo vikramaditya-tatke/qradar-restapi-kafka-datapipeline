@@ -4,6 +4,7 @@ from typing import Generator, Tuple, List, Dict, Any
 
 import clickhouse_connect
 import requests
+from clickhouse_connect.driver.exceptions import DatabaseError
 
 from clickhouse import clickhouse, helpers
 from clickhouse.clickhouse import process_batch_async
@@ -136,6 +137,9 @@ class ETLPipeline:
             )
             raise
 
+        except DatabaseError as db_err:
+            raise
+
         except Exception as general_err:
             logger.error(
                 f"ETL failed: Unknown Error - {general_err}",
@@ -189,6 +193,9 @@ class ETLPipeline:
             )
             raise
 
+        except DatabaseError:
+            raise
+
         except Exception as general_err:
             logger.error(
                 f"ETL failed: Unknown Error - {general_err}",
@@ -212,6 +219,8 @@ def etl(
         # Clean up the progress bar
         if pipeline.progress_bar:
             pipeline.progress_bar.close()
+    except DatabaseError:
+        raise
     except Exception as err:
         logger.error(
             f"Unknown Error Occurred - {err}",

@@ -1,4 +1,4 @@
-from pydantic import AnyHttpUrl, constr, conint
+from pydantic import constr, conint
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,16 +33,9 @@ class Settings(BaseSettings):
     console_us_ip: str
     console_us_token: constr(min_length=10)
 
-    kafka_host: str
-    kafka_port: conint(ge=1, le=65535)  # Ensure the port is in a valid range
-
     max_attempts: conint(ge=1)  # Must be at least 1
-    imply_project_id: str
-    imply_api_key: constr(min_length=10)
     default_timeout: conint(ge=1)  # Timeout must be positive
     max_search_ttc_in_seconds: conint(ge=1)
-    batch_size_limit: conint(ge=1)
-    imply_base_url: AnyHttpUrl  # Ensure valid URL
 
     clickhouse_base_url: str
     clickhouse_batch_size: conint(ge=2)

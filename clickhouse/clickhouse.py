@@ -19,12 +19,17 @@ async def create_async_clickhouse_client() -> AsyncClient:
             connect_timeout=settings.default_timeout,
             send_receive_timeout=settings.default_timeout,
             settings={
-                "insert_deduplicate": False,
+                "insert_deduplicate": True,
             },
         )
         return client
-    except Exception as e:
-        print(f"Failed to connect to ClickHouse: {e}")
+    except DatabaseError as db_err:
+        logger.error(
+            f"Connected to clickhouse but error occurred while creating a client {db_err}"
+        )
+        raise
+    except Exception:
+        raise
 
 
 async def create_summing_merge_tree_table(
