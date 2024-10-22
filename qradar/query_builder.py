@@ -3,6 +3,24 @@ from datetime import datetime, timedelta
 from pipeline_logger import logger
 
 
+def validate_datetime_delta(start: datetime, stop: datetime) -> bool:
+    """
+    Validates if the difference between two datetime objects is greater than 180 minutes.
+
+    Args:
+        dt1 (datetime): The first datetime object.
+        dt2 (datetime): The second datetime object.
+
+    Returns:
+        bool: True if the difference is greater than 180 minutes, False otherwise.
+    """
+    # Get the absolute difference between the two datetime objects
+    difference = abs(start - stop)
+
+    # Check if the difference is greater than 180 minutes (3 hours)
+    return difference > timedelta(minutes=180)
+
+
 def get_query_size(query_name: str) -> str:
     """Determine the size of the query based on the query name."""
     large_queries = {
@@ -128,7 +146,8 @@ def get_search_params(
 
         # Parse duration into datetime objects
         start_time, stop_time = parse_duration(duration)
-
+        if not validate_datetime_delta(start=start_time, stop=stop_time):
+            raise ValueError("Time difference in search criteria too low")
         # Determine query size and chunk size
         query_size = get_query_size(query_name)
         if query_size == "large":
@@ -150,9 +169,10 @@ def get_search_params(
         )
 
         return search_params_list
-
-    except KeyError as e:
-        logger.error(f"Missing key in get_search_params: {str(e)}")
+    except ValueError as ve:
+        logger.error(f"Time difference in search criteria too low. {ve}")
+    except KeyError as ke:
+        logger.error(f"Missing key in get_search_params: {str(ke)}")
         raise
     except Exception as e:
         logger.error(f"Error generating search parameters: {str(e)}")

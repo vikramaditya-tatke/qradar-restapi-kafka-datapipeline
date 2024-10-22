@@ -3,7 +3,8 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type, retry_if_exception,
+    retry_if_exception_type,
+    retry_if_exception,
 )
 
 from pipeline_logger import logger
@@ -36,6 +37,7 @@ def retry_if_not_unauthorized_error(exception):
             return False  # Do not retry on 401 Unauthorized
     # Retry on other RequestExceptions
     return isinstance(exception, requests.exceptions.RequestException)
+
 
 @retry(
     stop=stop_after_attempt(settings.max_attempts),
@@ -73,20 +75,28 @@ def poll_search_status(qradar_connector, cursor_id):
 def handle_search_success(polling_response_header, search_params, qradar_connector):
     """Handles the successful completion of a search."""
     try:
-        parser_key_response_header = qradar_connector.get_parser_key(polling_response_header)
+        parser_key_response_header = qradar_connector.get_parser_key(
+            polling_response_header
+        )
         for key, value in parser_key_response_header.items():
             search_params["parser_key"] = key
             search_params["response_header"] = value
         logger.info(
             "Search Completed Successfully",
-            extra={"ApplicationLog": search_params, "QRadarLog": polling_response_header},
+            extra={
+                "ApplicationLog": search_params,
+                "QRadarLog": polling_response_header,
+            },
         )
         return search_params
     except Exception as e:
         logger.error(
             "Error retrieving search table",
             exc_info=True,
-            extra={"ApplicationLog": search_params, "QRadarLog": polling_response_header},
+            extra={
+                "ApplicationLog": search_params,
+                "QRadarLog": polling_response_header,
+            },
         )
         return None
 
@@ -98,9 +108,14 @@ def handle_search_error(e, search_params, search_response):
             f"Search Failed - Incorrect AQL query format - {e}",
             extra={"ApplicationLog": search_params, "QRadarLog": search_response},
         )
+    elif isinstance(e, ValueError):
+        logger.error(
+            f"Search Failed - Incorrect or missing search Parameters - {e}",
+            extra={"ApplicationLog": search_params, "QRadarLog": search_response},
+        )
     elif isinstance(e, requests.exceptions.HTTPError):
         error_code = e.response.status_code
-        error_message = e.response.json().get('message', 'No error message provided')
+        error_message = e.response.json().get("message", "No error message provided")
         search_response["Status Code"] = error_code
         search_response["Error Message"] = error_message
         if 500 <= error_code < 600:
@@ -141,8 +156,9 @@ def search_executor(
     search_response = None
     for search_params in search_params_list:
         try:
-            logger.debug("Generated search parameters", extra={"ApplicationLog": search_params})
-
+            logger.debug(
+                "Generated search parameters", extra={"ApplicationLog": search_params}
+            )
             # Trigger the search
             search_response = trigger_search(
                 qradar_connector, search_params["query"]["query_expression"]
@@ -153,10 +169,15 @@ def search_executor(
             # Poll the search status
             while search_params["attempt"] < settings.max_attempts:
                 search_params["attempt"] += 1
-                polling_response_header = poll_search_status(qradar_connector, cursor_id)
+                polling_response_header = poll_search_status(
+                    qradar_connector, cursor_id
+                )
                 logger.info(
                     "Search Status Polled",
-                    extra={"ApplicationLog": search_params, "QRadarLog": polling_response_header},
+                    extra={
+                        "ApplicationLog": search_params,
+                        "QRadarLog": polling_response_header,
+                    },
                 )
 
                 if polling_response_header.get("completed"):
@@ -174,14 +195,20 @@ def search_executor(
             else:
                 logger.warning(
                     "Search Failed - Attempts Exhausted",
-                    extra={"ApplicationLog": search_params, "QRadarLog": search_response},
+                    extra={
+                        "ApplicationLog": search_params,
+                        "QRadarLog": search_response,
+                    },
                 )
                 return None
 
         except Exception as e:
             handle_search_error(e, search_params, search_response)
             # Decide whether to continue or break based on the exception
-            if isinstance(e, requests.exceptions.HTTPError) and 500 <= e.response.status_code < 600:
+            if (
+                isinstance(e, requests.exceptions.HTTPError)
+                and 500 <= e.response.status_code < 600
+            ):
                 raise  # Re-raise server errors to trigger retries
             else:
                 continue  # Skip to the next search_param if available
