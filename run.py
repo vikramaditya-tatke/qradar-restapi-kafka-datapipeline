@@ -1,7 +1,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from multiprocessing import Pool
 from dataclasses import dataclass
+from multiprocessing import Pool
 from typing import Dict, Any, Optional, List
 
 from requests import Session
@@ -44,6 +44,9 @@ def process_query(
                 f"Query executed successfully for {customer_name}",
                 extra={"customer_name": customer_name, "query": query},
             )
+
+            # Remove `.` and `'` from the customer_name
+            customer_name = customer_name.replace(".", "").replace("'", "")
             # Prepare the result for further ETL processing
             query_result = QueryResult(
                 event_processor=event_processor,
@@ -110,7 +113,7 @@ def process_customer(
     customer_name: str,
     queries: Dict[str, str],
     duration: Dict[str, str],
-    max_threads: int
+    max_threads: int,
 ):
     """Processes all queries for a single customer using threads."""
     try:
@@ -160,7 +163,7 @@ def process_event_processor(
     duration: Dict[str, str],
     token: str,
     ip: str,
-    max_threads: int
+    max_threads: int,
 ):
     """Processes all customers for a given event processor (EP) in a single process."""
     session = Session()
@@ -171,7 +174,9 @@ def process_event_processor(
     )
 
     for customer_name in customers:
-        process_customer(qradar_connector, ep, customer_name, queries, duration, max_threads)
+        process_customer(
+            qradar_connector, ep, customer_name, queries, duration, max_threads
+        )
 
 
 def process_console(console_attr: str, max_threads: int):
@@ -187,7 +192,10 @@ def process_console(console_attr: str, max_threads: int):
     ip = getattr(settings, f"{console_attr}_ip")
 
     # Create arguments for multiprocessing
-    etl_params = [(ep, customers, queries, duration, token, ip, max_threads) for ep, customers in ep_client_list.items()]
+    etl_params = [
+        (ep, customers, queries, duration, token, ip, max_threads)
+        for ep, customers in ep_client_list.items()
+    ]
 
     # Process each EP using multiprocessing
     with Pool(processes=len(ep_client_list)) as pool:
@@ -197,7 +205,9 @@ def process_console(console_attr: str, max_threads: int):
 def main():
     """Main entry point for the ETL process."""
 
-    parser = argparse.ArgumentParser(description="Run the QRadar ETL pipeline for a specific console")
+    parser = argparse.ArgumentParser(
+        description="Run the QRadar ETL pipeline for a specific console"
+    )
     parser.add_argument(
         "--console",
         type=str,
