@@ -165,39 +165,7 @@ def fill_nulls_based_on_type(
         if ch_type.startswith("LowCardinality(String)") or ch_type.startswith("String"):
             fill_value = "N/A"
             fill_expressions.append(pl.col(col).fill_null(fill_value))
-        # elif ch_type.startswith(("UInt", "Int")):
-        #     fill_value = 0
-        #     fill_expressions.append(pl.col(col).fill_null(fill_value))
-        # elif ch_type.startswith("Decimal"):
-        #     fill_value = Decimal("0.00")
-        #     fill_expressions.append(pl.col(col).fill_null(fill_value))
-        # else:
-        #     # Default to "N/A" for any unspecified types
-        #     fill_value = "N/A"
-        #     fill_expressions.append(pl.col(col).fill_null(fill_value))
         df = df.with_columns(fill_expressions)
-    return df
-
-
-def replace_start_time(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Replaces 'Start Time' values that are 0 with the 'Start Time' from the next row.
-
-    Args:
-        df (pl.DataFrame): The Polars DataFrame to process.
-
-    Returns:
-        pl.DataFrame: The DataFrame with 'Start Time' values corrected.
-    """
-    # Replace 'Start Time' == 0 with the next row's 'Start Time'
-    df = df.with_columns(
-        [
-            pl.when(pl.col("Start Time") == 0)
-            .then(pl.col("Start Time").shift(-1))
-            .otherwise(pl.col("Start Time"))
-            .alias("Start Time")
-        ]
-    )
     return df
 
 
@@ -224,16 +192,6 @@ def transform_raw(
     # Create a Polars DataFrame from the renamed data
     df = pl.DataFrame(renamed_data, infer_schema_length=settings.clickhouse_batch_size)
 
-    # # Check if 'Start Time' exists
-    # if "Start Time" not in df.columns:
-    #     raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
-
-    # Replace 'Start Time' == 0 with the next row's 'Start Time'
-    # df = replace_start_time(df)
-
-    # Validate dates
-    # df = validate_dates(df)
-
     # Define ClickHouse type mapping for all columns
     column_names = df.columns
     type_mapping = {col: get_clickhouse_type_for_dict(col) for col in column_names}
@@ -252,9 +210,6 @@ def transform_raw(
         elif ch_type.startswith("Date"):
             df = df.with_columns([pl.col(col).cast(pl.Date)])
         # Add more type casts as necessary
-
-    # Drop the temporary 'Start_Time_Seconds' column
-    # df = df.drop("Start_Time_Seconds")
 
     # Extract column names again in case of any changes
     column_names = df.columns
@@ -289,38 +244,6 @@ def transform_first_raw(
     # Create a Polars DataFrame from the renamed data
     df = pl.DataFrame(renamed_data, infer_schema_length=settings.clickhouse_batch_size)
 
-    # Check if 'Start Time' exists
-    # if "Start Time" not in df.columns:
-    #     raise ValueError("Missing 'Start Time' or 'Time' key in JSON data.")
-
-    # Replace 'Start Time' == 0 with the next row's 'Start Time'
-    # df = replace_start_time(df)
-
-    # Calculate 'ReportDate' and 'WeekFrom' based on 'Start_Time_Seconds'
-    # df = df.with_columns(
-    #     [
-    #         pl.col("Start_Time_Seconds")
-    #         .apply(
-    #             lambda x: datetime.fromtimestamp(x).date() if x is not None else None,
-    #             return_dtype=pl.Date,
-    #         )
-    #         .alias("ReportDate"),
-    #         pl.col("Start_Time_Seconds")
-    #         .apply(
-    #             lambda x: (
-    #                 (datetime.fromtimestamp(x) + relativedelta(weekday=SA(-1))).date()
-    #                 if x is not None
-    #                 else None
-    #             ),
-    #             return_dtype=pl.Date,
-    #         )
-    #         .alias("WeekFrom"),
-    #     ]
-    # )
-
-    # Validate dates
-    # df = validate_dates(df)
-
     # Define ClickHouse type mapping for all columns
     column_names = df.columns
     type_mapping = {col: get_clickhouse_type_for_dict(col) for col in column_names}
@@ -338,10 +261,6 @@ def transform_first_raw(
             df = df.with_columns([pl.col(col).cast(pl.Datetime)])
         elif ch_type.startswith("Date"):
             df = df.with_columns([pl.col(col).cast(pl.Date)])
-    # Add more type casts as necessary
-
-    # Drop the temporary 'Start_Time_Seconds' column
-    # df = df.drop("Start_Time_Seconds")
 
     # Extract column names again in case of any changes
     column_names = df.columns
