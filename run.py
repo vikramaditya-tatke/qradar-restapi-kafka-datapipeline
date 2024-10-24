@@ -46,7 +46,7 @@ def process_query(
             )
 
             # Remove `.` and `'` from the customer_name
-            customer_name = customer_name.replace(".", "").replace("'", "")
+            # customer_name = customer_name.replace(".", "").replace("'", "")
             # Prepare the result for further ETL processing
             query_result = QueryResult(
                 event_processor=event_processor,
