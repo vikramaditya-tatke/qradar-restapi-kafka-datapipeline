@@ -50,7 +50,8 @@ class ETLPipeline:
             .replace("'", "")
             .replace('"', "")
             .replace("&", "")
-            .replace("_", "")
+            # .replace("_", "")
+            .replace(".", "")
         )
 
     def extract_batches(
