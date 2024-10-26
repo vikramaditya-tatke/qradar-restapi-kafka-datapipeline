@@ -39,7 +39,7 @@ def retry_if_not_unauthorized_error(exception):
             # Log the authentication error
             logger.error(
                 f"Check search parameters. Syntax error due to wrong query, EP or customer name: {exception}",
-                extra={"QRadarLog": {"Status Code": 422}},
+                extra={"QRadarLog": exception.response.json()},
             )
             return False  # Do not retry on 401 Unauthorized
     # Retry on other RequestExceptions
