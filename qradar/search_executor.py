@@ -35,6 +35,13 @@ def retry_if_not_unauthorized_error(exception):
                 extra={"QRadarLog": {"Status Code": 401}},
             )
             return False  # Do not retry on 401 Unauthorized
+        elif exception.response.status_code == 422:
+            # Log the authentication error
+            logger.error(
+                f"Check search parameters. Syntax error due to wrong query, EP or customer name: {exception}",
+                extra={"QRadarLog": {"Status Code": 422}},
+            )
+            return False  # Do not retry on 401 Unauthorized
     # Retry on other RequestExceptions
     return isinstance(exception, requests.exceptions.RequestException)
 
@@ -155,14 +162,16 @@ def search_executor(
     )
     search_response = None
     for search_params in search_params_list:
+        logger.debug(
+            "Generated search parameters", extra={"ApplicationLog": search_params}
+        )
         try:
-            logger.debug(
-                "Generated search parameters", extra={"ApplicationLog": search_params}
-            )
             # Trigger the search
             search_response = trigger_search(
                 qradar_connector, search_params["query"]["query_expression"]
             )
+            if not search_response:
+                return
             cursor_id = search_response["cursor_id"]
             search_params["attempt"] = 0
 

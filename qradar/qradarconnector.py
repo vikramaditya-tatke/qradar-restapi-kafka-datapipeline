@@ -70,14 +70,10 @@ class QRadarConnector:
             dict: Response Header
         """
         url = f"{self.base_url}/api/ariel/searches"
-
-        try:
-            response = self._make_request(
-                method="POST", url=url, params={"query_expression": query_expression}
-            )
-            return response.json()
-        except requests.exceptions.HTTPError as http_err:
-            raise
+        response = self._make_request(
+            method="POST", url=url, params={"query_expression": query_expression}
+        )
+        return response.json()
 
     def get_search_status(self, cursor_id: str) -> dict:
         """Gets the status of a QRadar search using the cursor ID.

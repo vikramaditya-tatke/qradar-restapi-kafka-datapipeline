@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     - QRadar Console IPs and Tokens
     - Kafka settings for the message queue
     - ClickHouse settings for the database
-    - Impli project and API keys
 
     Validation is applied to ensure proper data types and values.
     To override settings for testing or development, specify a different `.env` file.
