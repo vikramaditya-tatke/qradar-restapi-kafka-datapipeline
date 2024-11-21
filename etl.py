@@ -8,7 +8,6 @@ from clickhouse_connect.driver.exceptions import DatabaseError
 
 from clickhouse import clickhouse, helpers
 from clickhouse.clickhouse import process_batch_async
-
 # Set up a basic logger
 from pipeline_logger import logger
 from qradar.qradarconnector import parse_qradar_data
@@ -212,8 +211,8 @@ def etl(
     try:
         # pipeline.initialize_progress_bar()
         batch_generator = pipeline.extract_batches()
-        initial_ingestion = pipeline.run_first(batch_generator)
-        search_params["records_inserted"] = initial_ingestion
+        records_inserted = pipeline.run_first(batch_generator)
+        search_params["records_inserted"] = records_inserted
         logger.info(
             f"Initial Batch Ingested",
             extra={
@@ -221,12 +220,11 @@ def etl(
                 "QRadarLog": pipeline.qradar_log,
             },
         )
-        final_ingestion = pipeline.run(batch_generator)
-        total_rows_ingested = initial_ingestion + final_ingestion
+        records_inserted = pipeline.run(batch_generator)
         # Clean up the progress bar
         if pipeline.progress_bar:
             pipeline.progress_bar.close()
-        search_params["records_inserted"] = total_rows_ingested
+        search_params["records_inserted"] = records_inserted
         logger.info(
             f"Search Results Ingested",
             extra={
@@ -243,7 +241,7 @@ def etl(
                 "QRadarLog": pipeline.qradar_log,
             },
         )
-    except Exception as err:
+    except Exception as e:
         logger.error(
             f"Unknown Error Occurred",
             extra={
