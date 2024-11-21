@@ -1,9 +1,13 @@
 import sys
+from datetime import datetime
 from pathlib import Path
 
+import clickhouse_connect
 import loguru
 import ujson
 from pymongo import MongoClient
+
+from settings import settings
 
 
 class MongoDBHandler:
@@ -34,6 +38,53 @@ class MongoDBHandler:
             logger.error(f"Failed to write log to MongoDB: {e}. Record: {record}")
 
 
+class ClickHouseHandler:
+    def __init__(
+        self,
+        table="logs",
+    ):
+        self.client = clickhouse_connect.get_client(
+            host="localhost",
+            port=8123,
+            user="default",
+            # password="microsoft",
+            database="DataFetchingLogs",
+            compress=settings.clickhouse_compression_protocol,
+            connect_timeout=settings.default_timeout,
+            send_receive_timeout=settings.default_timeout,
+            settings={
+                "insert_deduplicate": True,
+            },
+        )
+        self.table = table
+
+    def emit(self, record):
+        # Check if record is already serialized, if yes, then load it
+        if isinstance(record, str):
+            record = ujson.loads(record)
+
+        # Ensure the record is a dictionary
+        if not isinstance(record, dict):
+            raise ValueError("Log record must be a dictionary")
+
+        # Access the serialized data safely
+        log_record = record.get("extra", {}).get("serialized_dict", record)
+
+        # Define columns and values for ClickHouse insert
+        columns = list(log_record.keys())
+        rows = [log_record[column] for column in columns]
+        json_string = ujson.dumps(log_record)
+        # Construct insert query
+        query = f"INSERT INTO {self.table} FORMAT JSONEachRow {json_string}"
+
+        # Execute the insert using connection from the pool
+        try:
+            self.client.command("SET input_format_import_nested_json = 1;")
+            result = self.client.command(query)
+        except Exception as e:
+            print(e)
+
+
 # TODO: Fix serialization errors when exec_info is set to True
 def serialize(record) -> dict:
     """Serializes the log records and merges ApplicationLog and QRadarLog into a single dictionary."""
@@ -48,23 +99,57 @@ def serialize(record) -> dict:
 
     merged_log = {**application_log, **qradar_log}
 
+    time: datetime = record["time"]
+    time = time.replace(tzinfo=None)
+    time = time.isoformat(timespec="milliseconds")
     final_log = {
-        "timestamp": str(record["time"]),
+        "timestamp": time,
         "message": record["message"],
         "level": record["level"].name,
         "module": record["module"],
         "line": record["line"],
         **merged_log,
     }
-
+    if "snapshot" in final_log:
+        del final_log["snapshot"]
+    if "progress_details" in final_log:
+        del final_log["progress_details"]
+    if "subsearch_ids" in final_log:
+        del final_log["subsearch_ids"]
+    if "response_header" in final_log:
+        del final_log["response_header"]
+    if "save_results" in final_log:
+        del final_log["save_results"]
+    if "size_on_disk" in final_log:
+        del final_log["size_on_disk"]
+    if "chunk_index" in final_log:
+        del final_log["chunk_index"]
+    if "compressed_data_file_count" in final_log:
+        del final_log["compressed_data_file_count"]
+    if "data_file_count" in final_log:
+        del final_log["data_file_count"]
+    if "compressed_data_total_size" in final_log:
+        del final_log["compressed_data_total_size"]
+    if "index_total_size" in final_log:
+        del final_log["index_total_size"]
+    if "index_file_count" in final_log:
+        del final_log["index_file_count"]
+    if "desired_retention_time_msec" in final_log:
+        del final_log["desired_retention_time_msec"]
+    if "query" in final_log and isinstance(final_log["query"], dict):
+        final_log["query_name"] = final_log["query"].get("query_name")
+        del final_log["query"]
+    if "start_time" in final_log and "stop_time" in final_log:
+        final_log["start_time"] = datetime.strptime(
+            final_log["start_time"], "%Y-%m-%d %H:%M:%S"
+        ).isoformat(timespec="milliseconds")
+        final_log["stop_time"] = datetime.strptime(
+            final_log["stop_time"], "%Y-%m-%d %H:%M:%S"
+        ).isoformat(timespec="milliseconds")
     additional_fields = {
         "data_ingestion_time": flattened_extra.get("data_ingestion_time"),
         "batch_size": flattened_extra.get("batch_size"),
     }
-
-    if "query" in final_log and isinstance(final_log["query"], dict):
-        final_log["query_name"] = final_log["query"].get("query_name")
-
     final_log.update({k: v for k, v in additional_fields.items() if v is not None})
 
     return final_log
@@ -105,7 +190,6 @@ def custom_format(record):
     message = truncate(record["message"], 150)
     module = truncate(record["module"], 20)
     line = record["line"]
-
     # Format the log message
     return (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
@@ -179,10 +263,14 @@ def modify_logger():
     )
 
     # Add MongoDB handler
-    mongo_handler = (
-        MongoDBHandler()
-    )  # You can customize the URI, db_name, and collection_name here
-    logger.add(mongo_handler.emit, format="{extra[serialized]}", enqueue=True)
+    # mongo_handler = (
+    #     MongoDBHandler()
+    # )  # You can customize the URI, db_name, and collection_name here
+    # logger.add(mongo_handler.emit, format="{extra[serialized]}", enqueue=True)
+    clickhouse_handler = (
+        ClickHouseHandler()
+    )  # Customize the host, user, password, etc. if needed
+    logger.add(clickhouse_handler.emit, format="{extra[serialized]}", enqueue=True)
     return logger
 
 
