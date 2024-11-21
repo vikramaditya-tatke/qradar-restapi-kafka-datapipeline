@@ -24,9 +24,9 @@ async def create_async_clickhouse_client() -> AsyncClient:
         )
         return client
     except DatabaseError as db_err:
-        logger.error(
-            f"Connected to clickhouse but error occurred while creating a client {db_err}"
-        )
+        # logger.error(
+        #     f"Connected to clickhouse but error occurred while creating a client"
+        # )
         raise
     except Exception:
         raise
@@ -63,12 +63,13 @@ async def load_rows_async_using_summing_merge_tree(
 ):
     try:
         client = await create_async_clickhouse_client()
-        result = await client.insert(
+        await client.insert(
             click_house_table_name,
             data=rows,
             column_names=column_names,
         )
         client.close()
+        return len(rows)
     except DatabaseError as e:
         raise
     except Exception as e:
@@ -77,12 +78,13 @@ async def load_rows_async_using_summing_merge_tree(
 
 async def process_batch_async(rows, column_names, click_house_table_name):
     try:
-        await load_rows_async_using_summing_merge_tree(
+        written_rows = await load_rows_async_using_summing_merge_tree(
             click_house_table_name=click_house_table_name,
             rows=rows,
             column_names=column_names,
         )
-    except DataError:
+        return written_rows
+    except DataError as e:
         raise
-    except Exception:
+    except Exception as e:
         raise
