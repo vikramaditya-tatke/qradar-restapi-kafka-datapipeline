@@ -29,7 +29,9 @@ def add_date(line_json):
         The modified JSON object.
     """
     try:
-        query_date_epoch = line_json["Start Time"]
+        query_date_epoch = line_json.get("Start Time", None)
+        if query_date_epoch is None:
+            query_date_epoch = line_json.get("Time", None)
 
         if query_date_epoch is None:
             raise KeyError("Missing 'Start Time' or 'Time' key in JSON data.")
@@ -48,7 +50,7 @@ def add_date(line_json):
         base_date = datetime.fromtimestamp(query_timestamp)
         previous_saturday = base_date + relativedelta(weekday=SA(-1))
         line_json["WeekFrom"] = previous_saturday.date()
-        line_json["Event Count"] = int(line_json["Event Count"])
+        # line_json["Event Count"] = int(line_json["Event Count"])
         line_json["ReportDate"] = base_date.date()
         line_json["Start Time"] = base_date
         return line_json
