@@ -31,31 +31,22 @@ def add_date(line_json):
     try:
         query_date_epoch = line_json.get("Start Time", None)
         if query_date_epoch is None:
-            query_date_epoch = line_json.get("Time", None)
+            raise KeyError("Missing 'Start Time' key in JSON data.")
+        base_date = datetime.strptime(
+            line_json["Start Time"], "%Y-%m-%d %I:%M:%S.%f %p %z"
+        ).replace(tzinfo=None)
 
-        if query_date_epoch is None:
-            raise KeyError("Missing 'Start Time' or 'Time' key in JSON data.")
-        elif query_date_epoch == 0:
-            raise ValueError("Qradar is sending Start Time as 0 epochs")
+        line_json.update(
+            {
+                "WeekFrom": (base_date + relativedelta(weekday=SA(-1))).date(),
+                "ReportDate": base_date.date(),
+                "Start Time": base_date,
+            }
+        )
 
-        # Determine timestamp type (milliseconds or seconds) and adjust if needed
-        if query_date_epoch > 1e10:
-            query_timestamp = query_date_epoch / 1000
-        else:
-            query_timestamp = query_date_epoch
-            line_json["Start Time"] = (
-                query_date_epoch * 1000
-            )  # Converting epoch to epoch milliseconds.
-
-        base_date = datetime.fromtimestamp(query_timestamp)
-        previous_saturday = base_date + relativedelta(weekday=SA(-1))
-        line_json["WeekFrom"] = previous_saturday.date()
-        # line_json["Event Count"] = int(line_json["Event Count"])
-        line_json["ReportDate"] = base_date.date()
-        line_json["Start Time"] = base_date
         return line_json
-    except KeyError:
-        raise
+    except KeyError as ke:
+        raise ke
 
 
 def get_clickhouse_type_for_dict(key: str) -> str:
@@ -172,7 +163,7 @@ def fill_nulls_based_on_type(
 
 
 def transform_raw(
-    data: List[Dict[str, Any]]
+    data: List[Dict[str, Any]],
 ) -> Tuple[List[Tuple[Any, ...]], List[str]]:
     """
     Transforms raw batch data into a list of tuples and extracts column names using Polars.
