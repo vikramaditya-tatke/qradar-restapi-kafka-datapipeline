@@ -24,13 +24,19 @@ class Settings(BaseSettings):
     console_3_ip: str
     console_3_token: constr(min_length=10)
     console_aa_ip: str
-    console_aa_token: constr(min_length=0)
+    console_aa_token: constr(min_length=10)
     console_aus_ip: str
-    console_aus_token: constr(min_length=0)
+    console_aus_token: constr(min_length=10)
     console_uae_ip: str
-    console_uae_token: constr(min_length=0)
+    console_uae_token: constr(min_length=10)
     console_us_ip: str
     console_us_token: constr(min_length=10)
+    console_ind_ip: str
+    console_ind_token: constr(min_length=10)
+    console_sa_ip: str
+    console_sa_token: constr(min_length=10)
+    console_at_ip: str
+    console_at_token: constr(min_length=10)
 
     max_attempts: conint(ge=1)  # Must be at least 1
     default_timeout: conint(ge=1)  # Timeout must be positive
