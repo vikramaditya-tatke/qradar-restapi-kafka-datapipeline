@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def add_date(line_json):
+def add_date(line_json, qradar_log, search_params):
     """
     Enhances a JSON object with date-related fields:
 
@@ -35,6 +35,15 @@ def add_date(line_json):
         base_date = datetime.strptime(
             line_json["Start Time"], "%Y-%m-%d %I:%M:%S.%f %p %z"
         ).replace(tzinfo=None)
+        if base_date <= datetime(1970, 1, 1):
+            logger.warning(
+                "Start Time is invalid",
+                extra={
+                    "ApplicationLog": search_params,
+                    "QRadarLog": qradar_log,
+                },
+            )
+            raise ValueError
 
         line_json.update(
             {
@@ -47,6 +56,8 @@ def add_date(line_json):
         return line_json
     except KeyError as ke:
         raise ke
+    except ValueError as ve:
+        raise ve
 
 
 def get_clickhouse_type_for_dict(key: str) -> str:

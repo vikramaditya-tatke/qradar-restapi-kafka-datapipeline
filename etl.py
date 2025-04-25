@@ -8,6 +8,7 @@ from clickhouse_connect.driver.exceptions import DatabaseError
 
 from clickhouse import clickhouse, helpers
 from clickhouse.clickhouse import process_batch_async
+
 # Set up a basic logger
 from pipeline_logger import logger
 from qradar.qradarconnector import parse_qradar_data
@@ -65,7 +66,7 @@ class ETLPipeline:
             current_record_count += 1
             # self.progress_bar.update()
             try:
-                event = helpers.add_date(event)
+                event = helpers.add_date(event, self.qradar_log, self.search_params)
                 if len(batch) >= settings.clickhouse_batch_size:
                     yield batch, current_record_count
                     batch = []
