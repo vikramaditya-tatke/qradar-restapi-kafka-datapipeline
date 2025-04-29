@@ -205,7 +205,7 @@ def main():
     parser.add_argument(
         "--console",
         type=str,
-        required=True,
+        # required=True,
         help="Specify the QRadar console to use (e.g., 1, us, uae)",
     )
     parser.add_argument(
@@ -227,12 +227,14 @@ def main():
         "aus": "console_aus",
         "uae": "console_uae",
         "us": "console_us",
+        "afg": "console_afg",
     }
 
     # Validate and retrieve console attributes
     try:
         # Process all event processors for the given console
-        console_attr = console_mapping.get(args.console)
+        # console_attr = console_mapping.get(args.console)
+        console_attr = "console_afg"
         if console_attr is None:
             raise ValueError(
                 f"Invalid console '{args.console}' specified. Available options: {list(console_mapping.keys())}"

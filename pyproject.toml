@@ -32,6 +32,7 @@ python-dateutil = "^2.9.0.post0"
 pyyaml = "^6.0.2"
 clickhouse-connect = "^0.8.6"
 jupyter = "^1.1.1"
+boto3 = "^1.37.30"
 
 
 [build-system]

@@ -1,5 +1,5 @@
 import clickhouse_connect
-from clickhouse_connect.driver import AsyncClient
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from clickhouse_connect.driver.exceptions import DatabaseError, DataError
 
 from pipeline_logger import logger
@@ -14,7 +14,7 @@ async def create_async_clickhouse_client() -> AsyncClient:
             user=settings.clickhouse_user,
             password=settings.clickhouse_password,
             database=settings.clickhouse_database,
-            secure=True,
+            secure=False,
             compress=settings.clickhouse_compression_protocol,
             connect_timeout=settings.default_timeout,
             send_receive_timeout=settings.default_timeout,

@@ -30,20 +30,22 @@ def add_date(line_json, qradar_log, search_params):
     """
     try:
         query_date_epoch = line_json.get("Start Time", None)
+        if query_date_epoch == 0:
+            raise ValueError
         if query_date_epoch is None:
             raise KeyError("Missing 'Start Time' key in JSON data.")
         base_date = datetime.strptime(
             line_json["Start Time"], "%Y-%m-%d %I:%M:%S.%f %p %z"
         ).replace(tzinfo=None)
-        if base_date <= datetime(1970, 1, 1):
-            logger.warning(
-                "Start Time is invalid",
-                extra={
-                    "ApplicationLog": search_params,
-                    "QRadarLog": qradar_log,
-                },
-            )
-            raise ValueError
+        # if base_date <= datetime(1970, 1, 1):
+        #     logger.warning(
+        #         "Start Time is invalid",
+        #         extra={
+        #             "ApplicationLog": search_params,
+        #             "QRadarLog": qradar_log,
+        #         },
+        #     )
+        #     raise ValueError
 
         line_json.update(
             {
