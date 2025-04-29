@@ -24,32 +24,6 @@ async def create_async_clickhouse_client() -> AsyncClient:
         )
         return client
     except DatabaseError as db_err:
-        # logger.error(
-        #     f"Connected to clickhouse but error occurred while creating a client"
-        # )
-        raise
-    except Exception:
-        raise
-
-
-async def create_summing_merge_tree_table(
-    click_house_table_name, fields, summing_fields
-):
-    client = await create_async_clickhouse_client()
-    create_table_query = f"""
-            CREATE TABLE IF NOT EXISTS {click_house_table_name} (
-                {", ".join(fields)}
-            ) ENGINE = SummingMergeTree()
-            PARTITION BY (WeekFrom)
-            ORDER BY tuple(
-                {", ".join(summing_fields)}
-            )
-            SETTINGS allow_nullable_key = 1, async_insert = 1
-        """
-    try:
-        await client.command(create_table_query)
-    except DatabaseError as e:
-        logger.error("ClickHouse Table Creation Failed")
         raise
     except Exception:
         raise

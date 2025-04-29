@@ -6,7 +6,7 @@ import clickhouse_connect
 import requests
 from clickhouse_connect.driver.exceptions import DatabaseError
 
-from clickhouse import clickhouse, helpers
+from clickhouse import helpers
 from clickhouse.clickhouse import process_batch_async
 
 # Set up a basic logger
@@ -37,12 +37,6 @@ class ETLPipeline:
         self.click_house_table_name = f"{self.customer_name}_{self.query_name}"
         self.written_rows = 0
         self.progress_bar = None
-
-    # def initialize_progress_bar(self):
-    #     self.progress_bar = tqdm(
-    #         total=self.qradar_log["record_count"],
-    #         desc=f"Receiving data for {self.search_params['customer_name']} {self.search_params['event_processor']} {self.search_params['query']['query_name']} {self.qradar_log['cursor_id']}",
-    #     )
 
     @staticmethod
     def _sanitize_customer_name(customer_name: str) -> str:
@@ -83,13 +77,6 @@ class ETLPipeline:
             batch, self.search_params["query"]["query_name"]
         )
 
-    def create_table(self, fields, summing_fields):
-        asyncio.run(
-            clickhouse.create_summing_merge_tree_table(
-                self.click_house_table_name, fields, summing_fields
-            )
-        )
-
     def load(self, rows: Any, column_names) -> None:
         try:
             written_rows = asyncio.run(
@@ -122,7 +109,6 @@ class ETLPipeline:
             rows, summing_fields, fields, column_names = self.transform_first(
                 first_batch
             )
-            self.create_table(fields, summing_fields)
             # Process the first batch
             start = time.perf_counter()
             self.load(rows, column_names)
@@ -130,14 +116,6 @@ class ETLPipeline:
             self.search_params["data_ingestion_time"] = round(
                 ((stop - start) / 3600), 2
             )
-
-            # logger.info(
-            #     "Initial Batch Ingested",
-            #     extra={
-            #         "ApplicationLog": self.search_params,
-            #         "QRadarLog": self.qradar_log,
-            #     },
-            # )
             return self.written_rows
         except KeyError as ke:
             raise
@@ -163,17 +141,10 @@ class ETLPipeline:
             self.search_params["data_ingestion_time"] = round(
                 ((stop - start) / 3600), 2
             )
-            # logger.info(
-            #     "Search Results Ingested",
-            #     extra={
-            #         "ApplicationLog": self.search_params,
-            #         "QRadarLog": self.qradar_log,
-            #     },
-            # )
             return self.written_rows
         except ValueError as ve:
             logger.error(
-                f"ETL failed: Missing Field",
+                "ETL failed: Missing Field",
                 extra={
                     "ApplicationLog": self.search_params,
                     "QRadarLog": self.qradar_log,
@@ -183,7 +154,7 @@ class ETLPipeline:
 
         except KeyError as ke:
             logger.error(
-                f"ETL failed: Missing Field",
+                "ETL failed: Missing Field",
                 extra={
                     "ApplicationLog": self.search_params,
                     "QRadarLog": self.qradar_log,
@@ -196,7 +167,7 @@ class ETLPipeline:
 
         except Exception as general_err:
             logger.error(
-                f"ETL failed: Unknown Error",
+                "ETL failed: Unknown Error",
                 extra={
                     "ApplicationLog": self.search_params,
                     "QRadarLog": self.qradar_log,
@@ -215,7 +186,7 @@ def etl(
         records_inserted = pipeline.run_first(batch_generator)
         search_params["records_inserted"] = records_inserted
         logger.info(
-            f"Initial Batch Ingested",
+            "Initial Batch Ingested",
             extra={
                 "ApplicationLog": search_params,
                 "QRadarLog": pipeline.qradar_log,
@@ -227,7 +198,7 @@ def etl(
             pipeline.progress_bar.close()
         search_params["records_inserted"] = records_inserted
         logger.info(
-            f"Search Results Ingested",
+            "Search Results Ingested",
             extra={
                 "ApplicationLog": search_params,
                 "QRadarLog": pipeline.qradar_log,
@@ -236,7 +207,7 @@ def etl(
     except DatabaseError as de:
         pipeline.qradar_log["description"] = de.args[0]
         logger.error(
-            f"ETL process failed",
+            "ETL process failed",
             extra={
                 "ApplicationLog": search_params,
                 "QRadarLog": pipeline.qradar_log,
@@ -244,7 +215,7 @@ def etl(
         )
     except Exception as e:
         logger.error(
-            f"Unknown Error Occurred",
+            "Unknown Error Occurred",
             extra={
                 "ApplicationLog": search_params,
                 "QRadarLog": pipeline.qradar_log,
