@@ -17,26 +17,24 @@ class Settings(BaseSettings):
     To override settings for testing or development, specify a different `.env` file.
     """
 
-    # console_1_ip: str
-    # console_1_token: constr(min_length=10)  # Token must be at least 10 characters
-    # console_2_ip: str
-    # console_2_token: constr(min_length=10)
-    # console_3_ip: str
-    # console_3_token: constr(min_length=10)
-    # console_aa_ip: str
-    # console_aa_token: constr(min_length=10)
-    # console_aus_ip: str
-    # console_aus_token: constr(min_length=10)
-    # console_uae_ip: str
-    # console_uae_token: constr(min_length=10)
-    # console_us_ip: str
-    # console_us_token: constr(min_length=10)
-    # console_ind_ip: str
-    # console_ind_token: constr(min_length=10)
-    # console_sa_ip: str
-    # console_sa_token: constr(min_length=10)
-    console_afg_ip: str
-    console_afg_token: constr(min_length=10)
+    console_1_ip: str
+    console_1_token: constr(min_length=10)  # Token must be at least 10 characters
+    console_2_ip: str
+    console_2_token: constr(min_length=10)
+    console_3_ip: str
+    console_3_token: constr(min_length=10)
+    console_aa_ip: str
+    console_aa_token: constr(min_length=10)
+    console_aus_ip: str
+    console_aus_token: constr(min_length=10)
+    console_uae_ip: str
+    console_uae_token: constr(min_length=10)
+    console_us_ip: str
+    console_us_token: constr(min_length=10)
+    console_ind_ip: str
+    console_ind_token: constr(min_length=10)
+    console_sa_ip: str
+    console_sa_token: constr(min_length=10)
 
     max_attempts: conint(ge=1)  # Must be at least 1
     default_timeout: conint(ge=1)  # Timeout must be positive

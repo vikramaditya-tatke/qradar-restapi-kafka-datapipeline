@@ -13,17 +13,12 @@ class ClickHouseclouedHandler:
         table="logs",
     ):
         self.client = clickhouse_connect.get_client(
-            host="localhost",
-            port=8123,
-            username="default",
-            password="microsoft",
-            database="DataFetchingLogs",
-            # compress=settings.clickhouse_compression_protocol,
-            # connect_timeout=settings.default_timeout,
-            # send_receive_timeout=settings.default_timeout,
-            # settings={
-            #     "insert_deduplicate": True,
-            # },
+            compress=settings.clickhouse_compression_protocol,
+            connect_timeout=settings.default_timeout,
+            send_receive_timeout=settings.default_timeout,
+            settings={
+                "insert_deduplicate": True,
+            },
         )
         self.table = table
 
