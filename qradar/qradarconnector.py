@@ -146,3 +146,5 @@ def parse_qradar_data(
         raise
     except ijson.common.IncompleteJSONError:
         raise
+    except Exception:
+        raise

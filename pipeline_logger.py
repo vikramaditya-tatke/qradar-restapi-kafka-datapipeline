@@ -71,20 +71,16 @@ class ClickHouseclouedHandler:
             print(f"Failed query data: {json_string}")
 
 
-
-
-
-
 class ClickHouseHandler:
     def __init__(
         self,
         table="logs",
     ):
         self.client = clickhouse_connect.get_client(
-            host="localhost",
-            port=8123,
-            user="default",
-            # password="microsoft",
+            host=settings.clickhouse_base_url,
+            port=settings.clickhouse_port,
+            user=settings.clickhouse_user,
+            password=settings.clickhouse_password,
             database="DataFetchingLogs",
             compress=settings.clickhouse_compression_protocol,
             connect_timeout=settings.default_timeout,
@@ -301,14 +297,15 @@ def modify_logger():
 
     clickhouse_cloued_handler = (
         ClickHouseclouedHandler()
-     )  #Customize the host, user, password, etc. if needed
-    logger.add(clickhouse_cloued_handler.emit, format="{extra[serialized]}", enqueue=True)
-    return logger
-
+    )  # Customize the host, user, password, etc. if needed
+    logger.add(
+        clickhouse_cloued_handler.emit, format="{extra[serialized]}", enqueue=True
+    )
+    # return logger
 
     clickhouse_handler = (
         ClickHouseHandler()
-     )  #Customize the host, user, password, etc. if needed
+    )  # Customize the host, user, password, etc. if needed
     logger.add(clickhouse_handler.emit, format="{extra[serialized]}", enqueue=True)
     return logger
 

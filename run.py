@@ -40,13 +40,6 @@ def process_query(
         )
 
         if result and result["response_header"]["record_count"] > 0:
-            logger.debug(
-                f"Query executed successfully for {customer_name}",
-                extra={"customer_name": customer_name, "query": query},
-            )
-
-            # Remove `.` and `'` from the customer_name
-            # customer_name = customer_name.replace(".", "").replace("'", "")
             # Prepare the result for further ETL processing
             query_result = QueryResult(
                 event_processor=event_processor,
@@ -62,14 +55,14 @@ def process_query(
             process_etl(qradar_connector, query_result)
 
         elif result:
-            logger.info(
-                f"No records found for {customer_name}",
+            logger.warning(
+                f"No records found",
                 extra={"customer_name": customer_name, "query": query},
             )
 
     except Exception as e:
         logger.error(
-            f"Error processing query for {customer_name}: {e}",
+            f"Error processing query",
             exc_info=True,
             extra={"customer_name": customer_name, "query": query},
         )
@@ -78,6 +71,16 @@ def process_query(
 
 def process_etl(qradar_connector: QRadarConnector, result: QueryResult):
     """Processes ETL for a single result."""
+    search_params = {
+        "event_processor": int(result.event_processor),
+        "customer_name": result.customer_name,
+        "query": result.query,
+        "response_header": result.response_header,
+        "attempt": result.attempt,
+        "parser_key": result.parser_key,
+        "start_time": result.duration["start_time"],
+        "stop_time": result.duration["stop_time"],
+    }
     try:
         response = qradar_connector.fetch_data(
             result.response_header["cursor_id"],
@@ -85,25 +88,16 @@ def process_etl(qradar_connector: QRadarConnector, result: QueryResult):
         )
         etl(
             response=response,
-            search_params={
-                "event_processor": int(result.event_processor),
-                "customer_name": result.customer_name,
-                "query": result.query,
-                "response_header": result.response_header,
-                "attempt": result.attempt,
-                "parser_key": result.parser_key,
-            },
+            search_params=search_params,
             base_url=qradar_connector.base_url,
-        )
-        logger.info(
-            f"ETL process completed for {result.customer_name}",
-            extra={"customer_name": result.customer_name},
         )
     except Exception as e:
         logger.error(
-            f"ETL process failed for {result.customer_name}: {e}",
+            f"ETL process failed",
             exc_info=True,
-            extra={"customer_name": result.customer_name},
+            extra={
+                "ApplicationLog": search_params,
+            },
         )
 
 

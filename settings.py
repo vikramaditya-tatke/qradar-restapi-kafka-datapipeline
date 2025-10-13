@@ -35,8 +35,6 @@ class Settings(BaseSettings):
     console_ind_token: constr(min_length=10)
     console_sa_ip: str
     console_sa_token: constr(min_length=10)
-    console_at_ip: str
-    console_at_token: constr(min_length=10)
 
     max_attempts: conint(ge=1)  # Must be at least 1
     default_timeout: conint(ge=1)  # Timeout must be positive
