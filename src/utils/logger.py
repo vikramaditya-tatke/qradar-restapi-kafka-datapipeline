@@ -4,7 +4,7 @@ from pathlib import Path
 import clickhouse_connect
 import loguru
 import ujson
-from settings import settings
+from .config import settings
 
 
 class ClickHouseclouedHandler:

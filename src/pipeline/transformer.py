@@ -6,13 +6,13 @@ import clickhouse_connect
 import requests
 from clickhouse_connect.driver.exceptions import DatabaseError
 
-from clickhouse import helpers
-from clickhouse.clickhouse import process_batch_async
+from src.pipeline import helpers
+from src.clients.clickhouse import process_batch_async
 
 # Set up a basic logger
-from pipeline_logger import logger
-from qradar.qradarconnector import parse_qradar_data
-from settings import settings
+from src.utils.logger import logger
+from src.clients.qradar import parse_qradar_data
+from src.utils.config import settings
 
 
 def transform(

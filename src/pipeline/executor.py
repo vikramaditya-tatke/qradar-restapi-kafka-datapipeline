@@ -7,10 +7,10 @@ from tenacity import (
     retry_if_exception,
 )
 
-from pipeline_logger import logger
-from qradar.qradarconnector import QRadarConnector
-from qradar.query_builder import get_search_params
-from settings import settings
+from src.utils.logger import logger
+from src.clients.qradar import QRadarConnector
+from src.pipeline.query_builder import get_search_params
+from src.utils.config import settings
 
 # Define common status codes
 UNAUTHORIZED = 401

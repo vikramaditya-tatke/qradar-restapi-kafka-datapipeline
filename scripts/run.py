@@ -6,12 +6,12 @@ from typing import Dict, Any, Optional, List
 
 from requests import Session
 
-from attributes import load_attributes
-from etl import etl
-from pipeline_logger import logger
-from qradar.qradarconnector import QRadarConnector
-from qradar.search_executor import search_executor
-from settings import Settings
+from src.models.attributes import load_attributes
+from src.pipeline.transformer import etl
+from src.utils.logger import logger
+from src.clients.qradar import QRadarConnector
+from src.pipeline.executor import search_executor
+from src.utils.config import Settings
 
 
 @dataclass

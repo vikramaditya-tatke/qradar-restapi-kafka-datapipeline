@@ -1,0 +1,40 @@
+# ClickHouse type mappings and configurations
+
+CLICKHOUSE_TYPE_MAPPING = {
+    "Source IP": "IPv4",
+    "Destination IP": "IPv4",
+    "Event Count": "UInt64",
+    "Bytes Sent": "UInt64",
+    "Bytes Received": "UInt64",
+    "QID": "UInt64",
+    "Source Port": "UInt16",
+    "Destination Port": "UInt16",
+    "Magnitude": "UInt8",
+    "Start Time": "DateTime64(3)",
+    "ReportDate": "Date",
+    "WeekFrom": "Date",
+}
+
+NULLABLE_COLUMNS = [
+    "Username",
+    "Error Code",
+    "Threat Name",
+    "Source Hostname",
+    "Event ID",
+    "Logon Type",
+    "Source Workstation",
+    "Process Name",
+    "Policy Name",
+    "Category Description",
+    "URL domain",
+    "bad_key",
+    "Sender",
+    "Recipient",
+    "Command",
+    "Affected Workload",
+    "Application Name",
+    "Account Security ID",
+    "Rule Name",
+    "URL Domain",
+    "Action",
+]

@@ -3,15 +3,15 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import List, Dict
 
-from pipeline_logger import logger
+from src.utils.logger import logger
 
 
 class AttributeLoader:
     def __init__(self, root_dir: Path = None):
-        self.root_dir = root_dir or Path(__file__).parent
+        self.root_dir = root_dir or Path(__file__).parent.parent.parent / "config"
 
     def _load_json(self, filename: str) -> List[Dict]:
-        path = self.root_dir / "qradar" / "input" / filename
+        path = self.root_dir / filename
         try:
             with path.open("r") as f:
                 return json.load(f)

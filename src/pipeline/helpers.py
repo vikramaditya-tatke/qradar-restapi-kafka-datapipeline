@@ -1,17 +1,13 @@
 # helpers.py
 
-import logging
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
 
 import polars as pl
 from dateutil.relativedelta import SA, relativedelta
 
-from settings import settings
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from src.utils.config import settings
+from src.utils.logger import logger
 
 
 def add_date(line_json, qradar_log, search_params):

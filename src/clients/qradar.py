@@ -7,7 +7,7 @@ from requests.exceptions import HTTPError, ReadTimeout
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 
-from settings import settings
+from src.utils.config import settings
 
 # Disable warnings about insecure HTTPS requests (if using self-signed certs, for example)
 disable_warnings(InsecureRequestWarning)

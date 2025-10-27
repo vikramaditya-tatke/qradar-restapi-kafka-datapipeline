@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from pipeline_logger import logger
+from src.utils.logger import logger
 
 
 def validate_datetime_delta(start: datetime, stop: datetime) -> bool:
