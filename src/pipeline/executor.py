@@ -1,3 +1,5 @@
+import uuid
+
 import requests
 from tenacity import (
     retry,
@@ -203,6 +205,9 @@ def search_executor(
     )
 
     for search_params in search_params_list:
+        # Add request_id for end-to-end tracking
+        search_params["request_id"] = f"req_{uuid.uuid4().hex[:8]}"
+
         logger.debug(
             "Generated search parameters.",
             extra={"ApplicationLog": search_params},

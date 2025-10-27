@@ -151,9 +151,9 @@ def process_customer(
 
 def process_event_processor(
     ep: int,
-    customers: list[str],
-    queries: dict[str, str],
-    duration: dict[str, str],
+    customers: list,
+    queries: dict,
+    duration: dict,
     token: str,
     ip: str,
     max_threads: int,
