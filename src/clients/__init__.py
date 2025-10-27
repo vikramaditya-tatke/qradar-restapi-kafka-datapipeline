@@ -12,5 +12,5 @@ __all__ = [
     "QRadarConnector",
     "parse_qradar_data",
     "create_async_clickhouse_client",
-    "process_batch_async"
+    "process_batch_async",
 ]

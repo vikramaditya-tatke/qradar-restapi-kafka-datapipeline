@@ -48,7 +48,7 @@ def load_attributes():
         return {
             "ep_client_list": loader.load_ep_client_list(),
             "queries": loader.load_queries(),
-            "duration": loader.load_duration()
+            "duration": loader.load_duration(),
         }
     except SystemExit:
         # Don't catch SystemExit here, let it propagate to stop execution

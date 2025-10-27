@@ -11,5 +11,5 @@ __all__ = [
     "load_attributes",
     "AttributeLoader",
     "CLICKHOUSE_TYPE_MAPPING",
-    "NULLABLE_COLUMNS"
+    "NULLABLE_COLUMNS",
 ]

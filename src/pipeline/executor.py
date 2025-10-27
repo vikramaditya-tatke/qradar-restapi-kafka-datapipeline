@@ -116,7 +116,7 @@ def handle_search_success(polling_response, search_params, qradar_connector):
             },
         )
         return search_params
-    except Exception as e:
+    except Exception:
         logger.error(
             "Error retrieving search table.",
             exc_info=True,
@@ -245,7 +245,7 @@ def search_executor(
             while search_params["attempt"] < settings.max_attempts:
                 search_params["attempt"] += 1
                 logger.info(
-                    f"Polling search status",
+                    "Polling search status",
                     extra={
                         "ApplicationLog": search_params,
                         "QRadarLog": search_response,

@@ -9,9 +9,4 @@ from .config import settings, Settings
 from .logger import logger
 from . import helpers
 
-__all__ = [
-    "settings",
-    "Settings",
-    "logger",
-    "helpers"
-]
+__all__ = ["settings", "Settings", "logger", "helpers"]

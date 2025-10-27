@@ -56,13 +56,13 @@ def process_query(
 
         elif result:
             logger.warning(
-                f"No records found",
+                "No records found",
                 extra={"customer_name": customer_name, "query": query},
             )
 
-    except Exception as e:
+    except Exception:
         logger.error(
-            f"Error processing query",
+            "Error processing query",
             exc_info=True,
             extra={"customer_name": customer_name, "query": query},
         )
@@ -91,9 +91,9 @@ def process_etl(qradar_connector: QRadarConnector, result: QueryResult):
             search_params=search_params,
             base_url=qradar_connector.base_url,
         )
-    except Exception as e:
+    except Exception:
         logger.error(
-            f"ETL process failed",
+            "ETL process failed",
             exc_info=True,
             extra={
                 "ApplicationLog": search_params,

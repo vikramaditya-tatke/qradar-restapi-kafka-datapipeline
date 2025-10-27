@@ -64,7 +64,7 @@ class ClickHouseclouedHandler:
         try:
             # Execute the insert using the correct query format
             self.client.command("SET input_format_import_nested_json = 1;")
-            result = self.client.command(query)
+            self.client.command(query)
         except Exception as e:
             print(f"ClickHouse Insert Error: {e}")
             # Optionally print the query or json_string if the error is related to the input
@@ -103,9 +103,7 @@ class ClickHouseHandler:
         # Access the serialized data safely
         log_record = record.get("extra", {}).get("serialized_dict", record)
 
-        # Define columns and values for ClickHouse insert
-        columns = list(log_record.keys())
-        rows = [log_record[column] for column in columns]
+        # Prepare JSON string for ClickHouse insert
         json_string = ujson.dumps(log_record)
         # Construct insert query
         query = f"INSERT INTO {self.table} FORMAT JSONEachRow {json_string}"
@@ -113,7 +111,7 @@ class ClickHouseHandler:
         # Execute the insert using connection from the pool
         try:
             self.client.command("SET input_format_import_nested_json = 1;")
-            result = self.client.command(query)
+            self.client.command(query)
         except Exception as e:
             print(e)
 

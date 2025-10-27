@@ -2,7 +2,6 @@ import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from clickhouse_connect.driver.exceptions import DatabaseError, DataError
 
-from src.utils.logger import logger
 from src.utils.config import settings
 
 
@@ -23,7 +22,7 @@ async def create_async_clickhouse_client() -> AsyncClient:
             },
         )
         return client
-    except DatabaseError as db_err:
+    except DatabaseError:
         raise
     except Exception:
         raise
@@ -44,9 +43,9 @@ async def load_rows_async_using_summing_merge_tree(
         )
         client.close()
         return len(rows)
-    except DatabaseError as e:
+    except DatabaseError:
         raise
-    except Exception as e:
+    except Exception:
         raise
 
 
@@ -58,7 +57,7 @@ async def process_batch_async(rows, column_names, click_house_table_name):
             column_names=column_names,
         )
         return written_rows
-    except DataError as e:
+    except DataError:
         raise
-    except Exception as e:
+    except Exception:
         raise

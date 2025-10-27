@@ -14,12 +14,7 @@ Main Components:
 
 from . import clients, models, pipeline, utils
 
-__all__ = [
-    "clients",
-    "models",
-    "pipeline",
-    "utils"
-]
+__all__ = ["clients", "models", "pipeline", "utils"]
 
 __version__ = "1.0.0"
 __author__ = "Data Engineering Team"

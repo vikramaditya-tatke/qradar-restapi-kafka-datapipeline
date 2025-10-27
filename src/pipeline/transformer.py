@@ -64,7 +64,7 @@ class ETLPipeline:
                 if len(batch) >= settings.clickhouse_batch_size:
                     yield batch, current_record_count
                     batch = []
-            except ValueError as ve:
+            except ValueError:
                 continue
             batch.append(event)
         if batch:
@@ -117,13 +117,13 @@ class ETLPipeline:
                 ((stop - start) / 3600), 2
             )
             return self.written_rows
-        except KeyError as ke:
+        except KeyError:
             raise
 
-        except DatabaseError as db_err:
+        except DatabaseError:
             raise
 
-        except Exception as general_err:
+        except Exception:
             raise
 
     def run(
@@ -142,7 +142,7 @@ class ETLPipeline:
                 ((stop - start) / 3600), 2
             )
             return self.written_rows
-        except ValueError as ve:
+        except ValueError:
             logger.error(
                 "ETL failed: Missing Field",
                 extra={
@@ -152,7 +152,7 @@ class ETLPipeline:
             )
             raise
 
-        except KeyError as ke:
+        except KeyError:
             logger.error(
                 "ETL failed: Missing Field",
                 extra={
@@ -165,7 +165,7 @@ class ETLPipeline:
         except DatabaseError:
             raise
 
-        except Exception as general_err:
+        except Exception:
             logger.error(
                 "ETL failed: Unknown Error",
                 extra={
@@ -213,7 +213,7 @@ def etl(
                 "QRadarLog": pipeline.qradar_log,
             },
         )
-    except Exception as e:
+    except Exception:
         logger.error(
             "Unknown Error Occurred",
             extra={
