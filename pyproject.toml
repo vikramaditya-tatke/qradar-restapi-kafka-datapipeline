@@ -14,7 +14,6 @@ dependencies = [
     "tenacity>=8.4.2,<9",
     "urllib3>=2.2.2,<3",
     "polars>=0.20.31,<0.21",
-    "clickhouse-driver>=0.2.8,<0.3",
     "clickhouse-connect>=0.8.6,<0.9",
     "python-dateutil>=2.9.0.post0,<3",
 ]
