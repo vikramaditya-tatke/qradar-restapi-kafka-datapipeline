@@ -1,6 +1,8 @@
 import asyncio
 import time
-from typing import Generator, Tuple, List, Dict, Any
+from collections.abc import Generator
+from typing import Any
+
 
 import clickhouse_connect
 import requests
@@ -16,14 +18,14 @@ from src.utils.config import settings
 
 
 def transform(
-    batch: List[Dict[str, Any]],
+    batch: list[dict[str, Any]],
 ) -> tuple[list[tuple[Any | None, ...]], list[str]]:
     return helpers.transform_raw(batch)
 
 
 class ETLPipeline:
     def __init__(
-        self, response: requests.Response, search_params: Dict[str, Any], base_url: str
+        self, response: requests.Response, search_params: dict[str, Any], base_url: str
     ):
         self.response = response
         self.search_params = search_params
@@ -51,7 +53,7 @@ class ETLPipeline:
 
     def extract_batches(
         self,
-    ) -> Generator[Tuple[List[Dict[str, Any]], int], None, None]:
+    ) -> Generator[tuple[list[dict[str, Any]], int], None, None]:
         batch = []
         current_record_count = 0
         for event in parse_qradar_data(
@@ -71,7 +73,7 @@ class ETLPipeline:
             yield batch, current_record_count
 
     def transform_first(
-        self, batch: List[Dict[str, Any]]
+        self, batch: list[dict[str, Any]]
     ) -> tuple[list[tuple[Any | None, ...]], list[str], list[str], list[Any]]:
         return helpers.transform_first_raw(
             batch, self.search_params["query"]["query_name"]
@@ -100,7 +102,7 @@ class ETLPipeline:
             raise
 
     def run_first(
-        self, batch_generator: Generator[Tuple[List[Dict[str, Any]], int], None, None]
+        self, batch_generator: Generator[tuple[list[dict[str, Any]], int], None, None]
     ):
         """Runs the ETL pipeline by processing the first batch."""
         try:
@@ -127,7 +129,7 @@ class ETLPipeline:
             raise
 
     def run(
-        self, batch_generator: Generator[Tuple[List[Dict[str, Any]], int], None, None]
+        self, batch_generator: Generator[tuple[list[dict[str, Any]], int], None, None]
     ):
         """Runs the ETL pipeline by processing subsequent batches."""
         try:
@@ -177,7 +179,7 @@ class ETLPipeline:
 
 
 def etl(
-    response: requests.Response, search_params: Dict[str, Any], base_url: str
+    response: requests.Response, search_params: dict[str, Any], base_url: str
 ) -> None:
     pipeline = ETLPipeline(response, search_params, base_url)
     try:

@@ -2,7 +2,6 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from multiprocessing import Pool
-from typing import Dict, Any, Optional, List
 
 from requests import Session
 
@@ -18,9 +17,9 @@ from src.utils.config import Settings
 class QueryResult:
     event_processor: int
     customer_name: str
-    query: Dict[str, str]
-    duration: Dict[str, str]
-    response_header: Dict[str, Any]
+    query: dict
+    duration: dict
+    response_header: dict
     attempt: int
     parser_key: str
 
@@ -29,9 +28,9 @@ def process_query(
     qradar_connector: QRadarConnector,
     event_processor: int,
     customer_name: str,
-    query: Dict[str, str],
-    duration: Dict[str, str],
-) -> Optional[QueryResult]:
+    query: dict[str, str],
+    duration: dict[str, str],
+) -> QueryResult | None:
     """Process a single query and execute ETL if query has data."""
     try:
         # Execute the query
@@ -105,8 +104,8 @@ def process_customer(
     qradar_connector: QRadarConnector,
     event_processor: int,
     customer_name: str,
-    queries: Dict[str, str],
-    duration: Dict[str, str],
+    queries: dict[str, str],
+    duration: dict[str, str],
     max_threads: int,
 ):
     """Processes all queries for a single customer using threads."""
@@ -152,9 +151,9 @@ def process_customer(
 
 def process_event_processor(
     ep: int,
-    customers: List[str],
-    queries: Dict[str, str],
-    duration: Dict[str, str],
+    customers: list[str],
+    queries: dict[str, str],
+    duration: dict[str, str],
     token: str,
     ip: str,
     max_threads: int,
@@ -177,7 +176,7 @@ def process_console(console_attr: str, max_threads: int):
     """Processes all event processors for a given console."""
     settings = Settings()
     attributes = load_attributes()
-    ep_client_list = attributes.get("ep_client_list")
+    ep_client_list = attributes["ep_client_list"]
     queries = attributes["queries"]
     duration = attributes["duration"]
 

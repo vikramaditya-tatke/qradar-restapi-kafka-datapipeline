@@ -1,7 +1,8 @@
 # helpers.py
 
 from datetime import datetime
-from typing import List, Dict, Any, Tuple
+from typing import Any
+
 
 import polars as pl
 from dateutil.relativedelta import SA, relativedelta
@@ -90,15 +91,15 @@ def get_clickhouse_type_for_dict(key: str) -> str:
     return mapping.get(key, "LowCardinality(String)")
 
 
-def rename_event(event: Dict[str, Any]) -> Dict[str, Any]:
+def rename_event(event: dict[str, Any]) -> dict[str, Any]:
     """
     Cleans and renames event keys based on a predefined mapping.
 
     Args:
-        event (Dict[str, Any]): The original event data.
+        event (dict[str, Any]): The original event data.
 
     Returns:
-        Dict[str, Any]: The renamed event data.
+        dict[str, Any]: The renamed event data.
     """
     mapping = {
         "DomainName(DomainID)": "domainName",
@@ -147,14 +148,14 @@ def rename_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def fill_nulls_based_on_type(
-    df: pl.DataFrame, type_mapping: Dict[str, str]
+    df: pl.DataFrame, type_mapping: dict[str, str]
 ) -> pl.DataFrame:
     """
     Replaces null values in the DataFrame based on the ClickHouse data types.
 
     Args:
         df (pl.DataFrame): The Polars DataFrame to process.
-        type_mapping (Dict[str, str]): A mapping of column names to ClickHouse data types.
+        type_mapping (dict[str, str]): A mapping of column names to ClickHouse data types.
 
     Returns:
         pl.DataFrame: The DataFrame with nulls filled appropriately.
@@ -170,17 +171,17 @@ def fill_nulls_based_on_type(
 
 
 def transform_raw(
-    data: List[Dict[str, Any]],
-) -> Tuple[List[Tuple[Any, ...]], List[str]]:
+    data: list[dict[str, Any]],
+) -> tuple[list[tuple[Any, ...]], list[str]]:
     """
     Transforms raw batch data into a list of tuples and extracts column names using Polars.
     Incorporates the functionality of add_date directly into the transformation.
 
     Args:
-        data (List[Dict[str, Any]]): The batch of data to transform.
+        data (list[dict[str, Any]]): The batch of data to transform.
 
     Returns:
-        Tuple[List[Tuple[Any, ...]], List[str]]: A tuple containing the transformed rows and the list of column names.
+        tuple[list[tuple[Any, ...]], list[str]]: A tuple containing the transformed rows and the list of column names.
     """
     if not data:
         logger.warning("No data provided to transform_raw.")
@@ -221,14 +222,14 @@ def transform_raw(
 
 
 def transform_first_raw(
-    data: List[Dict[str, Any]], query_name: str
-) -> Tuple[List[Tuple[Any, ...]], List[str], List[str], List[Any]]:
+    data: list[dict[str, Any]], query_name: str
+) -> tuple[list[tuple[Any, ...]], list[str], list[str], list[Any]]:
     """
     Transforms the first batch of data, prepares fields and summing_fields for ClickHouse table creation using Polars.
     Incorporates the functionality of add_date directly into the transformation.
 
     Args:
-        data (List[Dict[str, Any]]): The first batch of data to transform.
+        data (list[dict[str, Any]]): The first batch of data to transform.
         query_name (str): The name of the query to determine summing_fields.
 
     Returns:

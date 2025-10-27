@@ -1,4 +1,5 @@
-from typing import Generator, Dict, Any
+from collections.abc import Generator
+from typing import Any
 
 import ijson
 import requests
@@ -138,7 +139,7 @@ class QRadarConnector:
 
 def parse_qradar_data(
     response: requests.Response, parser_key: str
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     try:
         for event in ijson.items(response.raw, parser_key):
             yield event

@@ -1,7 +1,6 @@
 import json
 from json import JSONDecodeError
 from pathlib import Path
-from typing import List, Dict
 
 from src.utils.logger import logger
 
@@ -10,7 +9,7 @@ class AttributeLoader:
     def __init__(self, root_dir: Path = None):
         self.root_dir = root_dir or Path(__file__).parent.parent.parent / "config"
 
-    def _load_json(self, filename: str) -> List[Dict]:
+    def _load_json(self, filename: str) -> list[dict]:
         path = self.root_dir / filename
         try:
             with path.open("r") as f:
@@ -32,13 +31,13 @@ class AttributeLoader:
             logger.error(msg)
             raise SystemExit(msg)  # Exit gracefully with error message
 
-    def load_queries(self) -> List[Dict]:
+    def load_queries(self) -> list[dict]:
         return self._load_json("queries.json")
 
-    def load_ep_client_list(self) -> List[Dict]:
+    def load_ep_client_list(self) -> list[dict]:
         return self._load_json("ep_clients.json")
 
-    def load_duration(self) -> List[Dict]:
+    def load_duration(self) -> list[dict]:
         return self._load_json("duration.json")
 
 
