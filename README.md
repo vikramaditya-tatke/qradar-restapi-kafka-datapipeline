@@ -5,7 +5,7 @@ A robust data pipeline that extracts security event data from QRadar consoles an
 ## Project Structure
 
 ```
-qradar-clickhouse-pipeline/          
+qradar-clickhouse-pipeline/
 ├── README.md
 ├── WARP.md
 ├── pyproject.toml
@@ -50,6 +50,44 @@ qradar-clickhouse-pipeline/
 │
 └── scripts/                          # Executable scripts
     └── run.py                       # Main entry point
+```
+
+## Code Flow
+
+```mermaid
+flowchart TD
+    A[scripts/run.py] --> B[Load Configuration]
+    B --> C[models/attributes.py]
+    C --> D{For Each Event Processor}
+
+    D --> E[pipeline/query_builder.py]
+    E --> F[Build AQL Query]
+    F --> G[pipeline/executor.py]
+
+    G --> H[clients/qradar.py]
+    H --> I[Execute Search on QRadar]
+    I --> J{Data Available?}
+
+    J -->|Yes| K[pipeline/transformer.py]
+    J -->|No| L[Log & Skip]
+
+    K --> M[Extract Batches]
+    M --> N[Transform Data]
+    N --> O[clients/clickhouse.py]
+    O --> P[Load to ClickHouse]
+
+    P --> Q[utils/logger.py]
+    L --> Q
+    Q --> R[Log Results]
+
+    R --> S{More Queries?}
+    S -->|Yes| D
+    S -->|No| T[Complete]
+
+    style A fill:#e1f5fe
+    style H fill:#f3e5f5
+    style O fill:#e8f5e8
+    style Q fill:#fff3e0
 ```
 
 ## Overview

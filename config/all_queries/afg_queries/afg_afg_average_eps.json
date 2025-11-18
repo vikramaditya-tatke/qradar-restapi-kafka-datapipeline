@@ -1,0 +1,3 @@
+{
+  "AverageEPS": "SELECT DOMAINNAME(domainId) AS domainName,domainId AS 'Domain',  DATEFORMAT(starttime,'yyyy-MM-dd hh:mm:ss.SSS a Z') AS 'Start Time', LOGSOURCETYPENAME(devicetype) AS \"Log Source Type\", logsourcename(logSourceId) AS \"Log Source\", SUM(eventCount) AS 'Event Count'  FROM events WHERE DOMAINNAME(domainId) != '{customer_name}' AND deviceType NOT IN ('18', '147', '246', '267', '368') GROUP BY Domain, domainName, \"Log Source\", \"Log Source Type\" START '{start_time}' STOP '{stop_time}' PARAMETERS REMOTESERVERS=ARIELSERVERS4EPNAME(PROCESSORNAME({event_processor}))"
+}
