@@ -1,4 +1,6 @@
-from pydantic import constr, conint
+from typing import Annotated
+from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,39 +20,41 @@ class Settings(BaseSettings):
     """
 
     console_1_ip: str
-    console_1_token: constr(min_length=10)  # Token must be at least 10 characters
+    console_1_token: Annotated[str, Field(min_length=10)]
     console_2_ip: str
-    console_2_token: constr(min_length=10)
+    console_2_token: Annotated[str, Field(min_length=10)]
     console_3_ip: str
-    console_3_token: constr(min_length=10)
+    console_3_token: Annotated[str, Field(min_length=10)]
     console_aa_ip: str
-    console_aa_token: constr(min_length=10)
+    console_aa_token: Annotated[str, Field(min_length=10)]
     console_aus_ip: str
-    console_aus_token: constr(min_length=10)
+    console_aus_token: Annotated[str, Field(min_length=10)]
     console_uae_ip: str
-    console_uae_token: constr(min_length=10)
+    console_uae_token: Annotated[str, Field(min_length=10)]
     console_us_ip: str
-    console_us_token: constr(min_length=10)
+    console_us_token: Annotated[str, Field(min_length=10)]
     console_ind_ip: str
-    console_ind_token: constr(min_length=10)
+    console_ind_token: Annotated[str, Field(min_length=10)]
     console_sa_ip: str
-    console_sa_token: constr(min_length=10)
+    console_sa_token: Annotated[str, Field(min_length=10)]
 
-    max_attempts: conint(ge=1)  # Must be at least 1
-    default_timeout: conint(ge=1)  # Timeout must be positive
-    max_search_ttc_in_seconds: conint(ge=1)
+    max_attempts: Annotated[int, Field(ge=1)]
+    default_timeout: Annotated[int, Field(ge=1)]
+    max_search_ttc_in_seconds: Annotated[int, Field(ge=1)]
 
     clickhouse_base_url: str
-    clickhouse_batch_size: conint(ge=2)
+    clickhouse_batch_size: Annotated[int, Field(ge=2)]
     clickhouse_compression_protocol: str
     clickhouse_password: str
-    clickhouse_port: conint(ge=1, le=65535)
+    clickhouse_port: Annotated[int, Field(ge=1, le=65535)]
     clickhouse_database: str
     clickhouse_user: str
-    max_queries_per_event_processor: conint(ge=1)
-    max_event_processors_engaged: conint(ge=1)
+    max_queries_per_event_processor: Annotated[int, Field(ge=1)]
+    max_event_processors_engaged: Annotated[int, Field(ge=1)]
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(
+        env_file=str(Path(__file__).parent.parent.parent / ".env")
+    )
 
 
-settings = Settings()
+settings = Settings.model_validate({})

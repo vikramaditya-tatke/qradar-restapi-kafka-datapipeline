@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from multiprocessing import Pool
 
 from requests import Session
-
+from requests.exceptions import (
+    Timeout,
+    ConnectionError,
+    HTTPError,
+    RequestException,
+)
 from src.models.attributes import load_attributes
 from src.pipeline.transformer import etl
 from src.utils.logger import logger
@@ -15,6 +20,18 @@ from src.utils.config import Settings
 
 @dataclass
 class QueryResult:
+    """Result container for completed QRadar query execution.
+
+    Attributes:
+        event_processor: QRadar event processor ID.
+        customer_name: Target customer identifier.
+        query: Query name and AQL expression.
+        duration: Search time range configuration.
+        response_header: QRadar API response metadata.
+        attempt: Number of retry attempts made.
+        parser_key: JSON parsing key for streaming results.
+    """
+
     event_processor: int
     customer_name: str
     query: dict
@@ -31,7 +48,29 @@ def process_query(
     query: dict[str, str],
     duration: dict[str, str],
 ) -> QueryResult | None:
-    """Process a single query and execute ETL if query has data."""
+    """Executes QRadar search and triggers ETL if results contain data.
+
+    Args:
+        qradar_connector: Authenticated QRadar API client.
+        event_processor: Target event processor ID.
+        customer_name: Customer identifier for filtering.
+        query: Query name and AQL expression mapping.
+        duration: Start and stop time configuration.
+
+    Returns:
+        QueryResult if processing succeeds, None if failed or no data.
+    """
+    # Prepare logging context for all operations
+    log_context = {
+        "ApplicationLog": {
+            "event_processor": event_processor,
+            "customer_name": customer_name,
+            "query_name": query.get("query_name", "unknown"),
+            "start_time": duration.get("start_time"),
+            "stop_time": duration.get("stop_time"),
+        }
+    }
+    result = {}
     try:
         # Execute the query
         result = search_executor(
@@ -46,30 +85,107 @@ def process_query(
                 query=query,
                 duration=duration,
                 response_header=result["response_header"],
-                attempt=result["attempt"],
-                parser_key=result["parser_key"],
+                attempt=result.get("attempt", 0),
+                parser_key=result.get("parser_key", ""),
             )
+
+            # Add record count to logging context
+            log_context["ApplicationLog"]["record_count"] = result["response_header"][
+                "record_count"
+            ]
+            logger.info("Query executed successfully, starting ETL", extra=log_context)
 
             # Run ETL for this query
             process_etl(qradar_connector, query_result)
+            return query_result
 
-        elif result:
-            logger.warning(
-                "No records found",
-                extra={"customer_name": customer_name, "query": query},
-            )
+        else:
+            logger.warning("No records found in QRadar response", extra=log_context)
+            return None
 
-    except Exception:
+    except Timeout as e:
         logger.error(
-            "Error processing query",
+            "QRadar API request timeout",
             exc_info=True,
-            extra={"customer_name": customer_name, "query": query},
+            extra={**log_context, "QRadarLog": {"timeout_error": str(e)}},
         )
         return None
 
+    except ConnectionError as e:
+        logger.error(
+            "QRadar API connection failed",
+            exc_info=True,
+            extra={**log_context, "QRadarLog": {"connection_error": str(e)}},
+        )
+        return None
+
+    except HTTPError as e:
+        logger.error(
+            "QRadar API HTTP error",
+            exc_info=True,
+            extra={
+                **log_context,
+                "QRadarLog": {
+                    "http_status": e.response.status_code if e.response else None,
+                    "http_error": str(e),
+                },
+            },
+        )
+        return None
+
+    except RequestException as e:
+        logger.error(
+            "QRadar API request failed",
+            exc_info=True,
+            extra={**log_context, "QRadarLog": {"request_error": str(e)}},
+        )
+        return None
+
+    except KeyError as e:
+        logger.error(
+            "Missing expected field in QRadar response",
+            exc_info=True,
+            extra={
+                **log_context,
+                "QRadarLog": {
+                    "missing_field": str(e),
+                    "result_keys": list(result.keys()) if result else [],
+                },
+            },
+        )
+        return None
+
+    except ValueError as e:
+        logger.error(
+            "Invalid data format from QRadar",
+            exc_info=True,
+            extra={**log_context, "QRadarLog": {"data_error": str(e)}},
+        )
+        return None
+
+    except Exception as e:
+        # Only for truly unexpected errors - these should be investigated
+        logger.critical(
+            "Unexpected error in process_query",
+            exc_info=True,
+            extra={
+                **log_context,
+                "QRadarLog": {
+                    "unexpected_error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            },
+        )
+        raise  # Re-raise unexpected errors for proper debugging
+
 
 def process_etl(qradar_connector: QRadarConnector, result: QueryResult):
-    """Processes ETL for a single result."""
+    """Fetches QRadar data and executes ETL pipeline to ClickHouse.
+
+    Args:
+        qradar_connector: Authenticated QRadar API client.
+        result: Query execution result containing metadata and identifiers.
+    """
     search_params = {
         "event_processor": int(result.event_processor),
         "customer_name": result.customer_name,
@@ -108,7 +224,16 @@ def process_customer(
     duration: dict[str, str],
     max_threads: int,
 ):
-    """Processes all queries for a single customer using threads."""
+    """Executes all configured queries for a customer using concurrent threads.
+
+    Args:
+        qradar_connector: Authenticated QRadar API client.
+        event_processor: Target event processor ID.
+        customer_name: Customer identifier for processing.
+        queries: Mapping of query names to AQL expressions.
+        duration: Time range configuration for all queries.
+        max_threads: Maximum concurrent query threads.
+    """
     try:
         with ThreadPoolExecutor(max_workers=max_threads) as executor:
             # Submit each query to a thread
@@ -158,7 +283,17 @@ def process_event_processor(
     ip: str,
     max_threads: int,
 ):
-    """Processes all customers for a given event processor (EP) in a single process."""
+    """Processes all customers for an event processor using dedicated connection.
+
+    Args:
+        ep: Event processor ID to target.
+        customers: List of customer names to process.
+        queries: Query name to AQL expression mapping.
+        duration: Time range configuration.
+        token: QRadar API authentication token.
+        ip: QRadar console IP address.
+        max_threads: Maximum threads per customer.
+    """
     session = Session()
     qradar_connector = QRadarConnector(
         sec_token=token,
@@ -173,8 +308,13 @@ def process_event_processor(
 
 
 def process_console(console_attr: str, max_threads: int):
-    """Processes all event processors for a given console."""
-    settings = Settings()
+    """Orchestrates multiprocess execution across all event processors for a console.
+
+    Args:
+        console_attr: Console configuration attribute name (e.g., 'console_1').
+        max_threads: Maximum threads per event processor.
+    """
+    settings = Settings.model_validate({})
     attributes = load_attributes()
     ep_client_list = attributes["ep_client_list"]
     queries = attributes["queries"]
@@ -187,7 +327,7 @@ def process_console(console_attr: str, max_threads: int):
     # Create arguments for multiprocessing
     etl_params = [
         (ep, customers, queries, duration, token, ip, max_threads)
-        for ep, customers in ep_client_list.items()
+        for ep, customers in ep_client_list
     ]
 
     # Process each EP using multiprocessing
@@ -196,7 +336,11 @@ def process_console(console_attr: str, max_threads: int):
 
 
 def main():
-    """Main entry point for the ETL process."""
+    """CLI entry point for QRadar data pipeline execution.
+
+    Parses command line arguments and initiates pipeline processing
+    for the specified console with configured threading limits.
+    """
 
     parser = argparse.ArgumentParser(
         description="Run the QRadar ETL pipeline for a specific console"

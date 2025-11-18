@@ -6,8 +6,8 @@ from src.utils.logger import logger
 
 
 class AttributeLoader:
-    def __init__(self, root_dir: Path = None):
-        self.root_dir = root_dir or Path(__file__).parent.parent.parent / "config"
+    def __init__(self):
+        self.root_dir = Path(__file__).parent.parent.parent / "config"
 
     def _load_json(self, filename: str) -> list[dict]:
         path = self.root_dir / filename
@@ -50,5 +50,4 @@ def load_attributes():
             "duration": loader.load_duration(),
         }
     except SystemExit:
-        # Don't catch SystemExit here, let it propagate to stop execution
         raise
