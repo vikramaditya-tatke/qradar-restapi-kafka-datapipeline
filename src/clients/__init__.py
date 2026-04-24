@@ -6,11 +6,10 @@ like QRadar and ClickHouse.
 """
 
 from .qradar import QRadarConnector, parse_qradar_data
-from .clickhouse import create_async_clickhouse_client, process_batch_async
+from .clickhouse import process_batch_async
 
 __all__ = [
     "QRadarConnector",
     "parse_qradar_data",
-    "create_async_clickhouse_client",
     "process_batch_async",
 ]

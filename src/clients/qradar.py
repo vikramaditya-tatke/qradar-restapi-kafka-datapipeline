@@ -14,6 +14,9 @@ from src.utils.config import settings
 disable_warnings(InsecureRequestWarning)
 
 
+from src.utils.circuit_breaker import CircuitBreaker, CircuitBreakerOpenException
+
+
 class QRadarConnector:
     def __init__(self, sec_token: str, session: Session, base_url: str):
         self.session = session
@@ -28,6 +31,7 @@ class QRadarConnector:
         self.default_timeout = settings.default_timeout
         self.max_search_ttc_in_seconds = settings.max_search_ttc_in_seconds
         self.current_record_count = 0
+        self.circuit_breaker = CircuitBreaker()
 
     def _make_request(self, method: str, url: str, **kwargs) -> Response:
         """Makes a request to the QRadar API with error handling.
@@ -42,24 +46,18 @@ class QRadarConnector:
 
         Raises:
             RequestException: For request-related errors.
+            CircuitBreakerOpenException: If the circuit is open.
         """
-        try:
+        with self.circuit_breaker:
             response = self.session.request(
                 method=method,
                 url=url,
                 timeout=self.default_timeout,
-                verify=False,
+                verify=settings.verify_ssl,
                 **kwargs,
             )
-            response.raise_for_status()  # Raise an exception for HTTP errors
+            response.raise_for_status()
             return response
-        except HTTPError:
-            # Log specific HTTP errors
-            raise
-        except ReadTimeout:
-            raise
-        except Exception:
-            raise
 
     def trigger_search(self, query_expression: dict) -> dict:
         """Triggers a QRadar search using the provided query expression.
@@ -102,7 +100,9 @@ class QRadarConnector:
             str: The dynamic key for parsing the JSON data.
         """
         parser_key = None
-        with self.session.get(url=url, stream=True, verify=False) as response:
+        with self.session.get(
+            url=url, stream=True, verify=settings.verify_ssl
+        ) as response:
             parser = ijson.parse(response.raw)
             for prefix, event, value in parser:
                 if event == "start_array":
@@ -131,7 +131,7 @@ class QRadarConnector:
             url=f"{self.base_url}/api/ariel/searches/{cursor_id}/results",
             headers={"Range": f"items={current_record_count}-{max_record_count}"},
             stream=True,
-            verify=False,
+            verify=settings.verify_ssl,
         )
         response.raise_for_status()
         return response
@@ -140,12 +140,5 @@ class QRadarConnector:
 def parse_qradar_data(
     response: requests.Response, parser_key: str
 ) -> Generator[dict[str, Any], None, None]:
-    try:
-        for event in ijson.items(response.raw, parser_key):
-            yield event
-    except ValueError:
-        raise
-    except ijson.common.IncompleteJSONError:
-        raise
-    except Exception:
-        raise
+    for event in ijson.items(response.raw, parser_key):
+        yield event

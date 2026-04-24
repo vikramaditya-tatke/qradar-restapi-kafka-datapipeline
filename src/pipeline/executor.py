@@ -1,5 +1,4 @@
 import uuid
-
 import requests
 from tenacity import (
     retry,
@@ -65,10 +64,6 @@ def handle_client_error_retries(exception):
         )
         return False
     elif is_unprocessable_entity(exception):
-        # logger.error(
-        #     "Syntax error due to incorrect query, EP, or customer name.",
-        #     extra={"QRadarLog": exception.response.json()},
-        # )
         return False
     return isinstance(exception, requests.exceptions.RequestException)
 
@@ -177,6 +172,115 @@ def handle_search_error(exception, search_params, search_response):
         )
 
 
+def poll_until_completion(qradar_connector, cursor_id, search_params, search_response):
+    """
+    Polls the search status until it completes or max attempts are reached.
+
+    Returns:
+        dict or None: The search results if successful, otherwise None.
+    """
+    search_params["attempt"] = 0
+
+    while search_params["attempt"] < settings.max_attempts:
+        search_params["attempt"] += 1
+        logger.info(
+            "Polling search status",
+            extra={
+                "ApplicationLog": search_params,
+                "QRadarLog": search_response,
+            },
+        )
+
+        polling_response = poll_search_status(qradar_connector, cursor_id)
+        logger.info(
+            "Search status polled.",
+            extra={
+                "ApplicationLog": search_params,
+                "QRadarLog": polling_response,
+            },
+        )
+
+        if polling_response.get("completed"):
+            return handle_search_success(
+                polling_response, search_params, qradar_connector
+            )
+
+        logger.info(
+            "Search is still running.",
+            extra={
+                "ApplicationLog": search_params,
+                "QRadarLog": polling_response,
+            },
+        )
+
+    logger.warning(
+        "Search failed after maximum attempts.",
+        extra={
+            "ApplicationLog": search_params,
+            "QRadarLog": search_response,
+        },
+    )
+    return None
+
+
+def execute_single_search(search_params, qradar_connector):
+    """
+    Executes a single search workflow: trigger -> poll -> handle result.
+
+    Returns:
+        dict or None: The search results if successful, otherwise None.
+    """
+    # Add request_id for end-to-end tracking
+    search_params["request_id"] = f"req_{uuid.uuid4().hex[:8]}"
+
+    logger.debug(
+        "Generated search parameters.",
+        extra={"ApplicationLog": search_params},
+    )
+    search_response = {}
+    try:
+        # Trigger the search
+        search_response = trigger_search(
+            qradar_connector, search_params["query"]["query_expression"]
+        )
+        if not search_response:
+            logger.warning(
+                "No search response received.",
+                extra={"ApplicationLog": search_params},
+            )
+            return None
+
+        logger.info(
+            "Search triggered successfully.",
+            extra={
+                "ApplicationLog": search_params,
+                "QRadarLog": search_response,
+            },
+        )
+
+        cursor_id = search_response.get("cursor_id")
+        if not cursor_id:
+            logger.error(
+                "No cursor_id found in search response.",
+                extra={
+                    "ApplicationLog": search_params,
+                    "QRadarLog": search_response,
+                },
+            )
+            return None
+
+        return poll_until_completion(
+            qradar_connector, cursor_id, search_params, search_response
+        )
+
+    except Exception as e:
+        handle_search_error(e, search_params, search_response)
+        # Re-raise only if it's a server error to trigger retry
+        if isinstance(e, requests.exceptions.HTTPError) and is_server_error(e):
+            raise  # Re-raise to trigger tenacity retries
+        return None
+
+
 def search_executor(
     event_processor: int,
     customer_name: str,
@@ -205,99 +309,8 @@ def search_executor(
     )
 
     for search_params in search_params_list:
-        # Add request_id for end-to-end tracking
-        search_params["request_id"] = f"req_{uuid.uuid4().hex[:8]}"
-
-        logger.debug(
-            "Generated search parameters.",
-            extra={"ApplicationLog": search_params},
-        )
-        search_response = {}
-        try:
-            # Trigger the search
-            search_response = trigger_search(
-                qradar_connector, search_params["query"]["query_expression"]
-            )
-            if not search_response:
-                logger.warning(
-                    "No search response received.",
-                    extra={"ApplicationLog": search_params},
-                )
-                continue
-
-            logger.info(
-                "Search triggered successfully.",
-                extra={
-                    "ApplicationLog": search_params,
-                    "QRadarLog": search_response,
-                },
-            )
-
-            cursor_id = search_response.get("cursor_id")
-            if not cursor_id:
-                logger.error(
-                    "No cursor_id found in search response.",
-                    extra={
-                        "ApplicationLog": search_params,
-                        "QRadarLog": search_response,
-                    },
-                )
-                continue
-
-            search_params["attempt"] = 0
-
-            # Poll the search status
-            while search_params["attempt"] < settings.max_attempts:
-                search_params["attempt"] += 1
-                logger.info(
-                    "Polling search status",
-                    extra={
-                        "ApplicationLog": search_params,
-                        "QRadarLog": search_response,
-                    },
-                )
-
-                polling_response = poll_search_status(qradar_connector, cursor_id)
-                logger.info(
-                    "Search status polled.",
-                    extra={
-                        "ApplicationLog": search_params,
-                        "QRadarLog": polling_response,
-                    },
-                )
-
-                if polling_response.get("completed"):
-                    # Handle successful search
-                    result = handle_search_success(
-                        polling_response, search_params, qradar_connector
-                    )
-                    if result:
-                        return result
-                    break  # Exit the loop if handling failed
-
-                logger.info(
-                    "Search is still running.",
-                    extra={
-                        "ApplicationLog": search_params,
-                        "QRadarLog": polling_response,
-                    },
-                )
-
-            else:
-                logger.warning(
-                    "Search failed after maximum attempts.",
-                    extra={
-                        "ApplicationLog": search_params,
-                        "QRadarLog": search_response,
-                    },
-                )
-
-        except Exception as e:
-            handle_search_error(e, search_params, search_response)
-            # Re-raise only if it's a server error to trigger retry
-            if isinstance(e, requests.exceptions.HTTPError) and is_server_error(e):
-                raise  # Re-raise to trigger tenacity retries
-            # For other exceptions, continue to the next search_params
-            continue
+        result = execute_single_search(search_params, qradar_connector)
+        if result:
+            return result
 
     return None

@@ -164,7 +164,6 @@ def process_query(
         return None
 
     except Exception as e:
-        # Only for truly unexpected errors - these should be investigated
         logger.critical(
             "Unexpected error in process_query",
             exc_info=True,
@@ -176,7 +175,7 @@ def process_query(
                 },
             },
         )
-        raise  # Re-raise unexpected errors for proper debugging
+        raise
 
 
 def process_etl(qradar_connector: QRadarConnector, result: QueryResult):
@@ -321,13 +320,19 @@ def process_console(console_attr: str, max_threads: int):
     duration = attributes["duration"]
 
     # Retrieve token and IP for the specified console
-    token = getattr(settings, f"{console_attr}_token")
-    ip = getattr(settings, f"{console_attr}_ip")
+    console_config = settings.consoles.get(console_attr)
+    if not console_config:
+        raise ValueError(
+            f"Configuration for console '{console_attr}' not found in settings."
+        )
+
+    token = console_config.token
+    ip = console_config.ip
 
     # Create arguments for multiprocessing
     etl_params = [
         (ep, customers, queries, duration, token, ip, max_threads)
-        for ep, customers in ep_client_list
+        for ep, customers in ep_client_list.items()
     ]
 
     # Process each EP using multiprocessing
@@ -361,25 +366,15 @@ def main():
 
     logger.debug("Application Started")
 
-    # Console mapping
-    console_mapping = {
-        "1": "console_1",
-        "2": "console_2",
-        "3": "console_3",
-        "aa": "console_aa",
-        "aus": "console_aus",
-        "uae": "console_uae",
-        "us": "console_us",
-    }
-
     # Validate and retrieve console attributes
     try:
         # Process all event processors for the given console
-        console_attr = console_mapping.get(args.console)
-        if console_attr is None:
-            raise ValueError(
-                f"Invalid console '{args.console}' specified. Available options: {list(console_mapping.keys())}"
-            )
+        # The console name should match the key in settings.consoles (e.g., '1', 'us', 'afg')
+        console_attr = args.console
+        
+        # Optional: Check if the console exists in settings before proceeding
+        # This check happens inside process_console anyway, but good for clarity
+        
         process_console(console_attr, args.max_threads)
     except Exception as e:
         logger.critical(

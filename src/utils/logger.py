@@ -3,29 +3,37 @@ from datetime import datetime
 from pathlib import Path
 import clickhouse_connect
 import loguru
-import ujson
-from .config import settings
+import orjson
+from src.utils.config import settings
 
 
-class ClickHouseclouedHandler:
+class ClickHouseCloudHandler:
     def __init__(
         self,
         table="logs",
     ):
-        self.client = clickhouse_connect.get_client(
-            host=settings.clickhouse_base_url,
-            port=settings.clickhouse_port,
-            user=settings.clickhouse_user,
-            password=settings.clickhouse_password,
-            database="DataFetchingLogs",
-            compress=settings.clickhouse_compression_protocol,
-            connect_timeout=settings.default_timeout,
-            send_receive_timeout=settings.default_timeout,
-            settings={
-                "insert_deduplicate": True,
-            },
-        )
+        self.client = None
         self.table = table
+
+    def connect(self):
+        if self.client is None:
+            try:
+                self.client = clickhouse_connect.get_client(
+                    host=settings.clickhouse_base_url,
+                    port=settings.clickhouse_port,
+                    user=settings.clickhouse_user,
+                    password=settings.clickhouse_password,
+                    database="DataFetchingLogs",
+                    secure=settings.clickhouse_secure,
+                    compress=settings.clickhouse_compression_protocol,
+                    connect_timeout=settings.default_timeout,
+                    send_receive_timeout=settings.default_timeout,
+                    settings={
+                        "insert_deduplicate": True,
+                    },
+                )
+            except Exception as e:
+                print(f"Failed to connect to ClickHouse for logging: {e}")
 
     def clean_float_values(self, d):
         """Recursively clean float values and convert them to integers if they are equivalent to integers."""
@@ -41,7 +49,7 @@ class ClickHouseclouedHandler:
     def emit(self, record):
         # Check if record is already serialized, if yes, then load it
         if isinstance(record, str):
-            record = ujson.loads(record)
+            record = orjson.loads(str(record))
 
         # Ensure the record is a dictionary
         if not isinstance(record, dict):
@@ -53,67 +61,21 @@ class ClickHouseclouedHandler:
         log_record = self.clean_float_values(log_record)
 
         # Prepare the JSON object for insertion
-        json_string = ujson.dumps(log_record, escape_forward_slashes=False)
-
-        # Print the JSON string to debug
-        # print(f"Prepared JSON for insertion: {json_string}")
+        json_string = orjson.dumps(log_record).decode("utf-8")
 
         # Construct the insert query with the formatted JSONEachRow
         query = f"INSERT INTO {self.table} FORMAT JSONEachRow {json_string}"
 
         try:
-            # Execute the insert using the correct query format
-            self.client.command("SET input_format_import_nested_json = 1;")
-            self.client.command(query)
+            self.connect()
+            if self.client:
+                # Execute the insert using the correct query format
+                self.client.command("SET input_format_import_nested_json = 1;")
+                self.client.command(query)
         except Exception as e:
             print(f"ClickHouse Insert Error: {e}")
             # Optionally print the query or json_string if the error is related to the input
             print(f"Failed query data: {json_string}")
-
-
-class ClickHouseHandler:
-    def __init__(
-        self,
-        table="logs",
-    ):
-        self.client = clickhouse_connect.get_client(
-            host=settings.clickhouse_base_url,
-            port=settings.clickhouse_port,
-            user=settings.clickhouse_user,
-            password=settings.clickhouse_password,
-            database="DataFetchingLogs",
-            compress=settings.clickhouse_compression_protocol,
-            connect_timeout=settings.default_timeout,
-            send_receive_timeout=settings.default_timeout,
-            settings={
-                "insert_deduplicate": True,
-            },
-        )
-        self.table = table
-
-    def emit(self, record):
-        # Check if record is already serialized, if yes, then load it
-        if isinstance(record, str):
-            record = ujson.loads(record)
-
-        # Ensure the record is a dictionary
-        if not isinstance(record, dict):
-            raise ValueError("Log record must be a dictionary")
-
-        # Access the serialized data safely
-        log_record = record.get("extra", {}).get("serialized_dict", record)
-
-        # Prepare JSON string for ClickHouse insert
-        json_string = ujson.dumps(log_record)
-        # Construct insert query
-        query = f"INSERT INTO {self.table} FORMAT JSONEachRow {json_string}"
-
-        # Execute the insert using connection from the pool
-        try:
-            self.client.command("SET input_format_import_nested_json = 1;")
-            self.client.command(query)
-        except Exception as e:
-            print(e)
 
 
 # TODO: Fix serialization errors when exec_info is set to True
@@ -192,7 +154,7 @@ def patching(record):
         # Ensure the 'extra' field exists
         record.setdefault("extra", {})
         record["extra"]["serialized_dict"] = serialized_dict
-        record["extra"]["serialized"] = ujson.dumps(serialized_dict)
+        record["extra"]["serialized"] = orjson.dumps(serialized_dict).decode("utf-8")
     except Exception as e:
         logger.error(f"Failed to serialize record: {e}. Record: {record}")
 
@@ -207,7 +169,7 @@ def truncate(value, max_length):
 
 def custom_format(record):
     # Parse the serialized extra data
-    extra_data = ujson.loads(record["extra"].get("serialized", "{}"))
+    extra_data = orjson.loads(record["extra"].get("serialized", "{}"))
 
     # Extract and truncate the fields
     event_processor = truncate(extra_data.get("event_processor", "N/A"), 4)
@@ -293,18 +255,13 @@ def modify_logger():
         diagnose=True,
     )
 
-    clickhouse_cloued_handler = (
-        ClickHouseclouedHandler()
+    clickhouse_cloud_handler = (
+        ClickHouseCloudHandler()
     )  # Customize the host, user, password, etc. if needed
     logger.add(
-        clickhouse_cloued_handler.emit, format="{extra[serialized]}", enqueue=True
+        clickhouse_cloud_handler.emit, format="{extra[serialized]}", enqueue=True
     )
-    # return logger
 
-    clickhouse_handler = (
-        ClickHouseHandler()
-    )  # Customize the host, user, password, etc. if needed
-    logger.add(clickhouse_handler.emit, format="{extra[serialized]}", enqueue=True)
     return logger
 
 

@@ -10,6 +10,7 @@ from clickhouse_connect.driver.exceptions import DatabaseError
 
 from src.pipeline import helpers
 from src.clients.clickhouse import process_batch_async
+from src.clients.clickhouse_manager import clickhouse_manager
 
 # Set up a basic logger
 from src.utils.logger import logger
@@ -79,14 +80,13 @@ class ETLPipeline:
             batch, self.search_params["query"]["query_name"]
         )
 
-    def load(self, rows: Any, column_names) -> None:
+    async def load(self, client, rows: Any, column_names) -> None:
         try:
-            written_rows = asyncio.run(
-                process_batch_async(
-                    rows=rows,
-                    column_names=column_names,
-                    click_house_table_name=self.click_house_table_name,
-                )
+            written_rows = await process_batch_async(
+                client=client,
+                rows=rows,
+                column_names=column_names,
+                click_house_table_name=self.click_house_table_name,
             )
             if written_rows:
                 self.written_rows += written_rows
@@ -101,8 +101,10 @@ class ETLPipeline:
             logger.error(f"An unexpected error occurred during loading: {load_err}")
             raise
 
-    def run_first(
-        self, batch_generator: Generator[tuple[list[dict[str, Any]], int], None, None]
+    async def run_first(
+        self,
+        client,
+        batch_generator: Generator[tuple[list[dict[str, Any]], int], None, None],
     ):
         """Runs the ETL pipeline by processing the first batch."""
         try:
@@ -113,7 +115,7 @@ class ETLPipeline:
             )
             # Process the first batch
             start = time.perf_counter()
-            self.load(rows, column_names)
+            await self.load(client, rows, column_names)
             stop = time.perf_counter()
             self.search_params["data_ingestion_time"] = round(
                 ((stop - start) / 3600), 2
@@ -128,8 +130,10 @@ class ETLPipeline:
         except Exception:
             raise
 
-    def run(
-        self, batch_generator: Generator[tuple[list[dict[str, Any]], int], None, None]
+    async def run(
+        self,
+        client,
+        batch_generator: Generator[tuple[list[dict[str, Any]], int], None, None],
     ):
         """Runs the ETL pipeline by processing subsequent batches."""
         try:
@@ -137,7 +141,7 @@ class ETLPipeline:
             start = time.perf_counter()
             for batch, current_record_count in batch_generator:
                 rows, fields = transform(batch)
-                self.load(rows, fields)
+                await self.load(client, rows, fields)
             stop = time.perf_counter()
 
             self.search_params["data_ingestion_time"] = round(
@@ -178,14 +182,16 @@ class ETLPipeline:
             raise
 
 
-def etl(
+async def etl_async(
     response: requests.Response, search_params: dict[str, Any], base_url: str
 ) -> None:
     pipeline = ETLPipeline(response, search_params, base_url)
+    client = None
     try:
+        client = await clickhouse_manager.get_client()
         # pipeline.initialize_progress_bar()
         batch_generator = pipeline.extract_batches()
-        records_inserted = pipeline.run_first(batch_generator)
+        records_inserted = await pipeline.run_first(client, batch_generator)
         search_params["records_inserted"] = records_inserted
         logger.info(
             "Initial Batch Ingested",
@@ -194,7 +200,7 @@ def etl(
                 "QRadarLog": pipeline.qradar_log,
             },
         )
-        records_inserted = pipeline.run(batch_generator)
+        records_inserted = await pipeline.run(client, batch_generator)
         # Clean up the progress bar
         if pipeline.progress_bar:
             pipeline.progress_bar.close()
@@ -223,3 +229,13 @@ def etl(
                 "QRadarLog": pipeline.qradar_log,
             },
         )
+    finally:
+        if client:
+            client.close()
+            logger.info("Closed ClickHouse AsyncClient for this query")
+
+
+def etl(
+    response: requests.Response, search_params: dict[str, Any], base_url: str
+) -> None:
+    asyncio.run(etl_async(response, search_params, base_url))
